@@ -40,11 +40,11 @@ start_nomad_gc() {
             local exit_code=$?
 
             if [[ $exit_code -eq 0 ]]; then
-                echo -e "\n$(date): Current alloc_bytes: ${current_alloc_bytes} | Ceiling: ${MEMORY_CEILING_BYTES}"
+                echo -e "\n$(date): Current alloc_bytes: $((current_alloc_bytes / 1024 / 1024 / 1024))GB | Ceiling: $((MEMORY_CEILING_BYTES / 1024 / 1024 / 1024))GB\n"
                 
                 # Direct comparison: trigger if allocated bytes are greater than or equal to the ceiling
                 if [[ $current_alloc_bytes -ge $MEMORY_CEILING_BYTES ]]; then
-                    echo "$(date): Memory usage (${current_alloc_bytes}) has breached the ceiling (${MEMORY_CEILING_BYTES}). Running 'nomad system gc'..."
+                    echo "$(date): Memory usage ($((current_alloc_bytes / 1024 / 1024 / 1024))GB) has breached the ceiling ($((MEMORY_CEILING_BYTES / 1024 / 1024 / 1024))GB). Running 'nomad system gc'..."
                     nomad system gc
                 fi
             else
