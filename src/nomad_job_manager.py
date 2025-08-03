@@ -98,7 +98,7 @@ class NomadJobManager:
         log_db: Optional[Any] = None,
         max_concurrent_dispatch: int = 2,
         polling_interval: int = 30,
-        job_timeout: int = 3600,  # switches to polling after this timeout
+        polling_escalation_timeout: int = 1800,  # Time after which a job's status is aggressively polled until resolved
     ):
         self.nomad_addr = nomad_addr
         self.namespace = namespace
@@ -107,7 +107,7 @@ class NomadJobManager:
         self.log_db = log_db
         self.max_concurrent_dispatch = max_concurrent_dispatch
         self.polling_interval = polling_interval
-        self.job_timeout = job_timeout
+        self.polling_escalation_timeout = polling_escalation_timeout
 
         parsed = urlparse(str(nomad_addr))
         self.client = nomad.Nomad(
@@ -390,46 +390,6 @@ class NomadJobManager:
 
                     tracker = self._active_jobs[job_id]
 
-                    # Check for job timeout - use graceful degradation
-                    job_age = time.time() - tracker.dispatch_time
-                    if job_age > self.job_timeout:
-                        logger.warning(
-                            f"Job {job_id} has exceeded timeout ({self.job_timeout}s), checking via polling..."
-                        )
-
-                        # Try to get job status one more time via polling
-                        try:
-                            await self._poll_job_status(tracker, force_check=True)
-
-                            # If still not in terminal state after forced polling, mark as failed
-                            if tracker.status not in (
-                                JobStatus.SUCCEEDED,
-                                JobStatus.FAILED,
-                                JobStatus.LOST,
-                                JobStatus.STOPPED,
-                                JobStatus.CANCELLED,
-                            ):
-                                logger.error(
-                                    f"Job {job_id} timed out after {self.job_timeout}s - no status found via polling"
-                                )
-                                tracker.status = JobStatus.FAILED
-                                tracker.error = TimeoutError(f"Job timed out after {self.job_timeout}s")
-                                tracker.completion_event.set()
-                                await self._update_job_status(tracker)
-                            else:
-                                logger.info(
-                                    f"Job {job_id} status recovered via timeout polling: {tracker.status.value}"
-                                )
-                        except Exception as e:
-                            logger.error(f"Job {job_id} timed out and polling failed: {e}")
-                            tracker.status = JobStatus.FAILED
-                            tracker.error = TimeoutError(
-                                f"Job timed out after {self.job_timeout}s and polling failed: {e}"
-                            )
-                            tracker.completion_event.set()
-                            await self._update_job_status(tracker)
-                        continue
-
                     # Skip if already completed
                     if tracker.status in (
                         JobStatus.SUCCEEDED,
@@ -440,9 +400,20 @@ class NomadJobManager:
                     ):
                         continue
 
+                    # Determine if we need to force a poll due to staleness or timeout
+                    force_check = event_stream_stale
+                    job_age = time.time() - tracker.dispatch_time
+
+                    if not force_check and job_age > self.polling_escalation_timeout:
+                        logger.warning(
+                            f"Job {job_id} has exceeded escalation timeout ({self.polling_escalation_timeout}s). "
+                            "Now relying on polling to determine final state."
+                        )
+                        force_check = True
+
                     # Poll job status from Nomad
                     try:
-                        await self._poll_job_status(tracker, force_check=event_stream_stale)
+                        await self._poll_job_status(tracker, force_check=force_check)
                     except Exception as e:
                         logger.error(f"Error polling job {job_id}: {e}")
 
