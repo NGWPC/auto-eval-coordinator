@@ -21,26 +21,42 @@ logger = logging.getLogger(__name__)
 
 
 class JobStatus(Enum):
-    DISPATCHED = "dispatched"
-    ALLOCATED = "allocated"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    LOST = "lost"
-    UNKNOWN = "unknown"
+    """
+    Internal job status enumeration aligned with Nomad ClientStatus values.
+
+    Status Categories:
+    - Non-terminal: DISPATCHED, PENDING, RUNNING
+    - Terminal (successful): SUCCEEDED
+    - Terminal (failure): FAILED, LOST
+    - Terminal (intentional stop): STOPPED, CANCELLED
+    - Terminal (unknown): UNKNOWN
+
+    Note: Reporting tools expect "JobStatus.FAILED" and "JobStatus.LOST"
+    patterns in logs for failure analysis.
+    """
+
+    DISPATCHED = "dispatched"  # Job dispatched to Nomad but no allocation yet
+    PENDING = "pending"  # Allocation waiting to be run
+    RUNNING = "running"  # Allocation currently executing
+    SUCCEEDED = "succeeded"  # Allocation finished successfully
+    FAILED = "failed"  # Allocation failed due to restart policy
+    LOST = "lost"  # Client lost connection with server
+    STOPPED = "stopped"  # Allocation terminated/stopped
+    CANCELLED = "cancelled"  # Allocation was cancelled
+    UNKNOWN = "unknown"  # Status could not be determined
 
 
 # Mapping from Nomad statuses to our internal statuses
+# Reflects latest Nomad ClientStatus values for better status tracking
 NOMAD_STATUS_MAP = {
-    "pending": JobStatus.ALLOCATED,
-    "running": JobStatus.RUNNING,
-    "complete": JobStatus.SUCCEEDED,
-    "failed": JobStatus.FAILED,
-    "lost": JobStatus.LOST,
-    "dead": JobStatus.FAILED,
-    # Additional mappings for edge cases
-    "stopped": JobStatus.FAILED,
-    "cancelled": JobStatus.FAILED,
+    "pending": JobStatus.PENDING,  # Allocation waiting to be run
+    "running": JobStatus.RUNNING,  # Allocation currently executing
+    "complete": JobStatus.SUCCEEDED,  # Allocation finished successfully (terminal)
+    "failed": JobStatus.FAILED,  # Allocation failed due to restart policy (terminal)
+    "lost": JobStatus.LOST,  # Client lost connection with server (terminal)
+    "dead": JobStatus.STOPPED,  # Allocation terminated, won't run again (terminal)
+    "stopped": JobStatus.STOPPED,  # Allocation being stopped/has been stopped (terminal)
+    "cancelled": JobStatus.CANCELLED,  # Allocation was cancelled (terminal)
 }
 
 
@@ -82,7 +98,7 @@ class NomadJobManager:
         log_db: Optional[Any] = None,
         max_concurrent_dispatch: int = 2,
         polling_interval: int = 30,
-        job_timeout: int = 7200,
+        job_timeout: int = 3600,  # switches to polling after this timeout
     ):
         self.nomad_addr = nomad_addr
         self.namespace = namespace
@@ -234,7 +250,7 @@ class NomadJobManager:
         while True:
             if tracker.allocation_id:
                 return
-            if tracker.status in (JobStatus.FAILED, JobStatus.LOST):
+            if tracker.status in (JobStatus.FAILED, JobStatus.LOST, JobStatus.STOPPED, JobStatus.CANCELLED):
                 raise JobDispatchError(f"Job {tracker.job_id} failed during allocation")
             await asyncio.sleep(1)
 
@@ -386,7 +402,13 @@ class NomadJobManager:
                             await self._poll_job_status(tracker, force_check=True)
 
                             # If still not in terminal state after forced polling, mark as failed
-                            if tracker.status not in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.LOST):
+                            if tracker.status not in (
+                                JobStatus.SUCCEEDED,
+                                JobStatus.FAILED,
+                                JobStatus.LOST,
+                                JobStatus.STOPPED,
+                                JobStatus.CANCELLED,
+                            ):
                                 logger.error(
                                     f"Job {job_id} timed out after {self.job_timeout}s - no status found via polling"
                                 )
@@ -409,7 +431,13 @@ class NomadJobManager:
                         continue
 
                     # Skip if already completed
-                    if tracker.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.LOST):
+                    if tracker.status in (
+                        JobStatus.SUCCEEDED,
+                        JobStatus.FAILED,
+                        JobStatus.LOST,
+                        JobStatus.STOPPED,
+                        JobStatus.CANCELLED,
+                    ):
                         continue
 
                     # Poll job status from Nomad
@@ -455,7 +483,9 @@ class NomadJobManager:
             new_status = NOMAD_STATUS_MAP.get(client_status, JobStatus.UNKNOWN)
 
             if new_status != JobStatus.UNKNOWN and (new_status != old_status or force_check):
-                logger.info(f"Job {tracker.job_id} status change via polling: {old_status.value} -> {new_status.value}")
+                logger.info(
+                    f"Job {tracker.job_id} status change via polling: JobStatus.{old_status.name} -> JobStatus.{new_status.name}"
+                )
                 tracker.status = new_status
                 tracker.timestamp = datetime.now(timezone.utc)
 
@@ -474,20 +504,20 @@ class NomadJobManager:
                             exit_code = task_state.get("ExitCode", 1)
                             tracker.exit_code = exit_code
                             failed_reason = task_state.get("Failed", "unknown")
-                            
+
                             # Collect failure events for detailed logging
                             events = task_state.get("Events", [])
                             failure_events = [e for e in events if e.get("Type") in ["Task Failed", "Driver Failure"]]
-                            
+
                             failure_detail = f"Task {task_name}: exit_code={exit_code}, reason={failed_reason}"
                             if failure_events:
                                 event_msgs = [e.get("DisplayMessage", "") for e in failure_events[-2:]]  # Last 2 events
                                 failure_detail += f", events={'; '.join(filter(None, event_msgs))}"
-                            
+
                             failure_details.append(failure_detail)
                             logger.info(f"Job {tracker.job_id} failure details via polling: {failure_detail}")
                             break
-                    
+
                     # Store comprehensive failure info in tracker
                     if failure_details and not tracker.error:
                         tracker.error = Exception(f"Job failed: {'; '.join(failure_details)}")
@@ -496,9 +526,15 @@ class NomadJobManager:
                 await self._update_job_status(tracker)
 
                 # Signal completion if terminal state
-                if new_status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.LOST):
+                if new_status in (
+                    JobStatus.SUCCEEDED,
+                    JobStatus.FAILED,
+                    JobStatus.LOST,
+                    JobStatus.STOPPED,
+                    JobStatus.CANCELLED,
+                ):
                     tracker.completion_event.set()
-                    logger.info(f"Job {tracker.job_id} completed via polling with status {new_status}")
+                    logger.info(f"Job {tracker.job_id} completed via polling with status JobStatus.{new_status.name}")
 
         except nomad.api.exceptions.URLNotFoundNomadException:
             logger.warning(f"Job {tracker.job_id} not found in Nomad - may have been garbage collected")
@@ -522,7 +558,13 @@ class NomadJobManager:
             await self._poll_job_status(tracker, force_check=True)
 
             # If the job is already in a terminal state, no need to wait
-            if tracker.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.LOST):
+            if tracker.status in (
+                JobStatus.SUCCEEDED,
+                JobStatus.FAILED,
+                JobStatus.LOST,
+                JobStatus.STOPPED,
+                JobStatus.CANCELLED,
+            ):
                 logger.info(f"Job {tracker.job_id} was already completed at dispatch time with status {tracker.status}")
                 tracker.completion_event.set()
 
@@ -606,7 +648,9 @@ class NomadJobManager:
         new_status = NOMAD_STATUS_MAP.get(client_status, JobStatus.UNKNOWN)
 
         if new_status != JobStatus.UNKNOWN and new_status != old_status:
-            logger.info(f"Job {job_id} status change via event: {old_status.value} -> {new_status.value}")
+            logger.info(
+                f"Job {job_id} status change via event: JobStatus.{old_status.name} -> JobStatus.{new_status.name}"
+            )
             tracker.status = new_status
             tracker.timestamp = datetime.now(timezone.utc)
 
@@ -627,20 +671,20 @@ class NomadJobManager:
                         exit_code = task_state.get("ExitCode", 1)
                         tracker.exit_code = exit_code
                         failed_reason = task_state.get("Failed", "unknown")
-                        
+
                         # Collect failure events for detailed logging
                         events = task_state.get("Events", [])
                         failure_events = [e for e in events if e.get("Type") in ["Task Failed", "Driver Failure"]]
-                        
+
                         failure_detail = f"Task {task_name}: exit_code={exit_code}, reason={failed_reason}"
                         if failure_events:
                             event_msgs = [e.get("DisplayMessage", "") for e in failure_events[-2:]]  # Last 2 events
                             failure_detail += f", events={'; '.join(filter(None, event_msgs))}"
-                        
+
                         failure_details.append(failure_detail)
                         logger.info(f"Job {job_id} failure details: {failure_detail}")
                         break
-                
+
                 # Store comprehensive failure info in tracker
                 if failure_details:
                     tracker.error = Exception(f"Job failed: {'; '.join(failure_details)}")
@@ -650,15 +694,21 @@ class NomadJobManager:
             # Update database
             await self._update_job_status(tracker)
 
-            if new_status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.LOST):
+            if new_status in (
+                JobStatus.SUCCEEDED,
+                JobStatus.FAILED,
+                JobStatus.LOST,
+                JobStatus.STOPPED,
+                JobStatus.CANCELLED,
+            ):
                 tracker.completion_event.set()
                 logger.info(
-                    f"Job {job_id} completed via event with status {new_status.value} (exit_code: {tracker.exit_code})"
+                    f"Job {job_id} completed via event with status JobStatus.{new_status.name} (exit_code: {tracker.exit_code})"
                 )
         elif new_status == JobStatus.UNKNOWN:
             logger.warning(f"Job {job_id} received unknown status: {client_status}")
         else:
-            logger.debug(f"Job {job_id} status unchanged: {old_status.value}")
+            logger.debug(f"Job {job_id} status unchanged: JobStatus.{old_status.name}")
 
     async def _update_job_status(self, tracker: JobTracker):
         if not self.log_db:
@@ -668,10 +718,14 @@ class NomadJobManager:
             status_str = tracker.status.value
 
             # Map internal status to database status if needed
-            if tracker.status == JobStatus.ALLOCATED:
-                status_str = "allocated"
-            elif tracker.status == JobStatus.SUCCEEDED:
+            if tracker.status == JobStatus.SUCCEEDED:
                 status_str = "succeeded"
+            elif tracker.status in (JobStatus.STOPPED, JobStatus.CANCELLED):
+                # Map new terminal statuses to meaningful database values
+                status_str = tracker.status.value
+
+            # Log status update in format expected by reporting tools
+            logger.info(f"Job {tracker.job_id} status updated: JobStatus.{tracker.status.name}")
 
             await self.log_db.update_job_status(
                 job_id=tracker.job_id,
