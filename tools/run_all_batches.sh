@@ -42,7 +42,9 @@ get_nomad_memory_usage_percentage() {
     
     # Get allocated and system memory from Nomad metrics using jq
     # Note: nomad can print "Unable to retrieve credentials" to stderr even when successful
-    if ! metrics_json=$(nomad operator metrics -json 2>&1 | grep -v "Unable to retrieve credentials"); then
+    # We use PIPESTATUS to check nomad command exit code, not grep exit code
+    metrics_json=$(nomad operator metrics -json 2>&1 | grep -v "Unable to retrieve credentials")
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
         echo "Error: 'nomad operator metrics' command failed" >&2
         return 1
     fi
@@ -73,14 +75,19 @@ start_nomad_gc() {
         export NOMAD_ADDR="${NOMAD_ADDR:-http://nomad-server-test.test.nextgenwaterprediction.com:4646}"
         
         while true; do
-            local memory_usage=$(get_nomad_memory_usage_percentage)
-            if [[ $? -eq 0 && $memory_usage -ge 20 ]]; then
-                echo "$(date): Nomad memory usage at ${memory_usage}% - Running nomad system gc"
-                nomad system gc
-            elif [[ $? -ne 0 ]]; then
-                echo "$(date): Warning - Could not check Nomad memory usage"
+            local memory_usage
+            memory_usage=$(get_nomad_memory_usage_percentage 2>&1)
+            local exit_code=$?
+            if [[ $exit_code -eq 0 ]]; then
+                echo -e "\n$(date): Nomad memory usage: ${memory_usage}%"
+                if [[ $memory_usage -ge 20 ]]; then
+                    echo "$(date): Memory usage >= 20% - Running nomad system gc"
+                    nomad system gc
+                fi
+            else
+                echo -e "\n$(date): Warning - Could not check Nomad memory usage. Debug info: $memory_usage"
             fi
-            sleep 60  # Check every minute
+            sleep 120  # Check every N seconds
         done
     ) &
     NOMAD_GC_PID=$!
