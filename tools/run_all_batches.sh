@@ -76,7 +76,7 @@ start_nomad_gc() {
         
         while true; do
             local memory_usage
-            memory_usage=$(get_nomad_memory_usage_percentage 2>&1)
+            memory_usage=$(get_nomad_memory_usage_percentage)
             local exit_code=$?
             if [[ $exit_code -eq 0 ]]; then
                 echo -e "\n$(date): Nomad memory usage: ${memory_usage}%"
@@ -85,7 +85,7 @@ start_nomad_gc() {
                     nomad system gc
                 fi
             else
-                echo -e "\n$(date): Warning - Could not check Nomad memory usage. Debug info: $memory_usage"
+                echo -e "\n$(date): Warning - Could not check Nomad memory usage"
             fi
             sleep 120  # Check every N seconds
         done
