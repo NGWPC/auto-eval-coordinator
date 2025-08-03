@@ -45,7 +45,13 @@ class BatchRunAnalyzer:
         failed_jobs = error_analysis.failed_jobs
         unique_errors = error_analysis.unique_errors
         
-        results["failed_jobs_count"] = len(failed_jobs)
+        # Count FAILED vs LOST jobs separately
+        failed_jobs_count = len([job for job in failed_jobs if job.job_status == "FAILED"])
+        lost_jobs_count = len([job for job in failed_jobs if job.job_status == "LOST"])
+        
+        results["failed_jobs_count"] = failed_jobs_count
+        results["lost_jobs_count"] = lost_jobs_count
+        results["total_failed_jobs_count"] = len(failed_jobs)  # Total of both FAILED and LOST
         results["unique_error_patterns_count"] = len(unique_errors)
         results["unhandled_exceptions_count"] = len(unhandled_exceptions_unique)
         results["submitted_pipelines_count"] = len(submitted_pipelines)

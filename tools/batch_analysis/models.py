@@ -21,12 +21,13 @@ class DebugConfig:
 
 @dataclass
 class FailedJobInfo:
-    """Information about a failed job."""
+    """Information about a failed or lost job."""
 
     pipeline_log_stream: str
     job_log_stream: str
     error_messages: List[str]
     timestamp: Optional[str] = None
+    job_status: str = "FAILED"  # Can be "FAILED" or "LOST"
 
 
 @dataclass

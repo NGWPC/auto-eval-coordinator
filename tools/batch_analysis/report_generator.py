@@ -23,7 +23,7 @@ class ReportGenerator:
         output_file = self.output_dir / "failed_jobs_errors.csv"
 
         with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "error_messages"]
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "error_messages"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
@@ -33,6 +33,7 @@ class ReportGenerator:
                         "timestamp": job.timestamp or "",
                         "pipeline_log_stream": job.pipeline_log_stream,
                         "job_log_stream": job.job_log_stream,
+                        "job_status": job.job_status,
                         "error_messages": "\n\n".join(job.error_messages),
                     }
                 )
@@ -45,7 +46,7 @@ class ReportGenerator:
         output_file = self.output_dir / "unhandled_exceptions.csv"
 
         with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["pipeline_log_stream", "job_log_stream", "unhandled_error_messages"]
+            fieldnames = ["pipeline_log_stream", "job_log_stream", "job_status", "unhandled_error_messages"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
@@ -54,6 +55,7 @@ class ReportGenerator:
                     {
                         "pipeline_log_stream": job.pipeline_log_stream,
                         "job_log_stream": job.job_log_stream,
+                        "job_status": job.job_status,
                         "unhandled_error_messages": "\n\n".join(job.error_messages),
                     }
                 )

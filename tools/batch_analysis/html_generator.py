@@ -50,6 +50,8 @@ class HTMLGenerator:
             'time_range_days': analysis_results.get('time_range_days', 'Unknown'),
             'submitted_pipelines_count': analysis_results.get('submitted_pipelines_count', 0),
             'failed_jobs_count': analysis_results.get('failed_jobs_count', 0),
+            'lost_jobs_count': analysis_results.get('lost_jobs_count', 0),
+            'total_failed_jobs_count': analysis_results.get('total_failed_jobs_count', 0),
             'unhandled_exceptions_count': analysis_results.get('unhandled_exceptions_count', 0),
             'unique_error_patterns_count': analysis_results.get('unique_error_patterns_count', 0),
             'failed_jobs': failed_jobs,

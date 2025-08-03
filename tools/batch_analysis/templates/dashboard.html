@@ -67,6 +67,7 @@
         .stat-value.success { color: #27ae60; }
         .stat-value.error { color: #e74c3c; }
         .stat-value.warning { color: #f39c12; }
+        .stat-value.lost { color: #e67e22; }
         .stat-value.info { color: #3498db; }
 
         .stat-label {
@@ -278,8 +279,14 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value error">{{ failed_jobs_count }}</div>
-                <div class="stat-label">Failed Jobs</div>
+                <div class="stat-label">Application Failures</div>
             </div>
+            {% if lost_jobs_count > 0 %}
+            <div class="stat-card">
+                <div class="stat-value lost">{{ lost_jobs_count }}</div>
+                <div class="stat-label">Lost Jobs (Infrastructure/Timeout)</div>
+            </div>
+            {% endif %}
             <div class="stat-card">
                 <div class="stat-value warning">{{ unhandled_exceptions_count }}</div>
                 <div class="stat-label">Unhandled Exceptions</div>
@@ -446,6 +453,15 @@
 
         <div id="failed-jobs" class="tab-content{% if unique_errors|length == 0 %} active{% endif %}">
             <h2 class="section-title">Failed Jobs Analysis</h2>
+            {% if lost_jobs_count > 0 %}
+            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 1rem; margin-bottom: 1rem;">
+                <h4 style="margin: 0 0 0.5rem 0; color: #856404;">📊 Job Status Types</h4>
+                <p style="margin: 0; font-size: 0.9rem; color: #856404;">
+                    <strong>❌ Application Failures ({{ failed_jobs_count }}):</strong> Jobs that failed due to application errors, validation issues, or business logic problems.<br>
+                    <strong>🔶 Lost Jobs ({{ lost_jobs_count }}):</strong> Jobs that were marked as LOST due to infrastructure issues, timeouts, or node failures. These typically indicate system-level problems rather than application errors.
+                </p>
+            </div>
+            {% endif %}
             <div class="export-links">
                 <a href="failed_jobs_errors.csv" class="export-link">📥 Download CSV</a>
             </div>
@@ -459,6 +475,7 @@
                     <thead>
                         <tr>
                             <th>Timestamp</th>
+                            <th>Status</th>
                             <th>Job Stream</th>
                             <th>Pipeline Stream</th>
                             <th>Error Messages</th>
@@ -468,6 +485,13 @@
                         {% for job in failed_jobs %}
                         <tr>
                             <td><span class="timestamp">{{ job.timestamp or 'N/A' }}</span></td>
+                            <td>
+                                {% if job.job_status == 'LOST' %}
+                                <span style="color: #e67e22; font-weight: bold;">🔶 LOST</span>
+                                {% else %}
+                                <span style="color: #e74c3c; font-weight: bold;">❌ FAILED</span>
+                                {% endif %}
+                            </td>
                             <td><span class="job-stream">{{ job.job_log_stream }}</span></td>
                             <td><span class="job-stream">{{ job.pipeline_log_stream }}</span></td>
                             <td>

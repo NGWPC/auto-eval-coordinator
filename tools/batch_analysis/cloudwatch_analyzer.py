@@ -63,12 +63,13 @@ class CloudWatchAnalyzer:
 
         # Query to find failed jobs with job stream names
         failed_jobs_query = f"""
-        fields @timestamp, @logStream as pipeline_log_stream
+        fields @timestamp, @logStream as pipeline_log_stream, @message
         | parse @message 'Job * ' as job_stream_name
+        | parse @message 'JobStatus.*' as job_status_raw
         | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.FAILED/
+        | filter @message like /JobStatus.(FAILED|LOST)/
         | sort @timestamp desc
-        | display @timestamp, pipeline_log_stream, job_stream_name
+        | display @timestamp, pipeline_log_stream, job_stream_name, job_status_raw
         """
 
         failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
@@ -84,11 +85,19 @@ class CloudWatchAnalyzer:
             timestamp = self._get_field_value(job, "@timestamp")
             pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
             job_stream = self._get_field_value(job, "job_stream_name", "").strip()
+            job_status_raw = self._get_field_value(job, "job_status_raw", "")
+            
+            # Extract the status (FAILED or LOST) from the raw status string
+            job_status = "FAILED"  # default
+            if "LOST" in job_status_raw:
+                job_status = "LOST"
+            elif "FAILED" in job_status_raw:
+                job_status = "FAILED"
 
             if not job_stream or job_stream == "N/A":
                 continue
 
-            logger.info(f"Analyzing errors for job: {job_stream}")
+            logger.info(f"Analyzing errors for job: {job_stream} (status: {job_status})")
 
             # Query for error messages in the specific job stream
             error_query = f"""
@@ -114,6 +123,7 @@ class CloudWatchAnalyzer:
                     job_log_stream=job_stream,
                     error_messages=error_messages,
                     timestamp=timestamp,
+                    job_status=job_status,
                 )
             )
 
@@ -131,11 +141,12 @@ class CloudWatchAnalyzer:
 
         # First get failed jobs
         failed_jobs_query = f"""
-        fields @logStream as pipeline_log_stream
+        fields @logStream as pipeline_log_stream, @message
         | parse @message 'Job * ' as job_stream_name
+        | parse @message 'JobStatus.*' as job_status_raw
         | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.FAILED/
-        | display pipeline_log_stream, job_stream_name
+        | filter @message like /JobStatus.(FAILED|LOST)/
+        | display pipeline_log_stream, job_stream_name, job_status_raw
         """
 
         failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
@@ -147,6 +158,14 @@ class CloudWatchAnalyzer:
         for job in failed_job_results:
             pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
             job_stream = self._get_field_value(job, "job_stream_name", "").strip()
+            job_status_raw = self._get_field_value(job, "job_status_raw", "")
+            
+            # Extract the status (FAILED or LOST) from the raw status string
+            job_status = "FAILED"  # default
+            if "LOST" in job_status_raw:
+                job_status = "LOST"
+            elif "FAILED" in job_status_raw:
+                job_status = "FAILED"
 
             if not job_stream or job_stream == "N/A":
                 continue
@@ -174,7 +193,7 @@ class CloudWatchAnalyzer:
             if error_messages and error_messages != ["No non-JSON error messages found"]:
                 unhandled_exceptions.append(
                     FailedJobInfo(
-                        pipeline_log_stream=pipeline_stream, job_log_stream=job_stream, error_messages=error_messages
+                        pipeline_log_stream=pipeline_stream, job_log_stream=job_stream, error_messages=error_messages, job_status=job_status
                     )
                 )
 
@@ -275,10 +294,11 @@ class CloudWatchAnalyzer:
 
         # Single query to get all failed jobs
         failed_jobs_query = f"""
-        fields @timestamp, @logStream as pipeline_log_stream
-        | parse @message 'Job * ' as job_stream_name  
+        fields @timestamp, @logStream as pipeline_log_stream, @message
+        | parse @message 'Job * ' as job_stream_name
+        | parse @message 'JobStatus.*' as job_status_raw
         | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.FAILED/
+        | filter @message like /JobStatus.(FAILED|LOST)/
         | sort @timestamp desc
         """
 
@@ -294,16 +314,26 @@ class CloudWatchAnalyzer:
         job_streams = []
         job_stream_to_pipeline = {}
         job_stream_to_timestamp = {}
+        job_stream_to_status = {}
 
         for job in failed_job_results:
             pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
             job_stream = self._get_field_value(job, "job_stream_name", "").strip()
             timestamp = self._get_field_value(job, "@timestamp")
+            job_status_raw = self._get_field_value(job, "job_status_raw", "")
+            
+            # Extract the status (FAILED or LOST) from the raw status string
+            job_status = "FAILED"  # default
+            if "LOST" in job_status_raw:
+                job_status = "LOST"
+            elif "FAILED" in job_status_raw:
+                job_status = "FAILED"
 
             if job_stream and job_stream != "N/A":
                 job_streams.append(job_stream)
                 job_stream_to_pipeline[job_stream] = pipeline_stream
                 job_stream_to_timestamp[job_stream] = timestamp
+                job_stream_to_status[job_stream] = job_status
 
         if not job_streams:
             logger.warning("No valid job streams found")
@@ -362,6 +392,7 @@ class CloudWatchAnalyzer:
                     job_log_stream=job_stream,
                     error_messages=errors,
                     timestamp=job_stream_to_timestamp.get(job_stream),
+                    job_status=job_stream_to_status.get(job_stream, "FAILED"),
                 )
             )
 
@@ -406,11 +437,12 @@ class CloudWatchAnalyzer:
 
         # Get failed job streams first
         failed_jobs_query = f"""
-        fields @logStream as pipeline_log_stream
+        fields @logStream as pipeline_log_stream, @message
         | parse @message 'Job * ' as job_stream_name
+        | parse @message 'JobStatus.*' as job_status_raw
         | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.FAILED/
-        | display pipeline_log_stream, job_stream_name
+        | filter @message like /JobStatus.(FAILED|LOST)/
+        | display pipeline_log_stream, job_stream_name, job_status_raw
         """
 
         failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
@@ -548,7 +580,7 @@ class CloudWatchAnalyzer:
                 streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
                 job_failure_query = f"""
                 fields @logStream
-                | filter ({streams_filter}) and @message like /JobStatus.FAILED/
+                | filter ({streams_filter}) and @message like /JobStatus.(FAILED|LOST)/
                 | stats count() by @logStream
                 """
                 
