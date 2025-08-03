@@ -59,6 +59,18 @@ class HTMLGenerator:
             'unique_errors': unique_errors or [],
             'unique_unhandled_exceptions': unique_unhandled_exceptions or [],
             'reports_generated': analysis_results.get('reports_generated', []),
+            
+            # Comprehensive job status data
+            'total_jobs_count': analysis_results.get('total_jobs_count', 0),
+            'succeeded_jobs_count': analysis_results.get('succeeded_jobs_count', 0),
+            'pending_jobs_count': analysis_results.get('pending_jobs_count', 0),
+            'running_jobs_count': analysis_results.get('running_jobs_count', 0),
+            'dispatched_jobs_count': analysis_results.get('dispatched_jobs_count', 0),
+            'stopped_jobs_count': analysis_results.get('stopped_jobs_count', 0),
+            'cancelled_jobs_count': analysis_results.get('cancelled_jobs_count', 0),
+            'unknown_jobs_count': analysis_results.get('unknown_jobs_count', 0),
+            'status_percentages': analysis_results.get('status_percentages', {}),
+            'jobs_by_status': analysis_results.get('jobs_by_status', {}),
         }
         
         # Add metrics data if available

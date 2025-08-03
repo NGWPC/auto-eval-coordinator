@@ -1,844 +1,833 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Batch Run Analysis Dashboard - {{ batch_name }}</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch Analysis Dashboard - {{ batch_name }}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f5f5f5;
-        }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f8f9fa;
+    }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
 
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 10px;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
+    .header {
+      background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+      color: white;
+      padding: 2rem;
+      border-radius: 12px;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
 
-        .header h1 {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-        }
+    .header h1 {
+      font-size: 2.2rem;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
 
-        .header-meta {
-            opacity: 0.9;
-            font-size: 0.9rem;
-        }
+    .header-meta {
+      opacity: 0.9;
+      font-size: 0.95rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
+    /* Health Score Card */
+    .health-score-card {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
 
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }
+    .health-score {
+      font-size: 4rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
 
-        .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
+    .health-score.excellent {
+      color: #27ae60;
+    }
 
-        .stat-value.success { color: #27ae60; }
-        .stat-value.error { color: #e74c3c; }
-        .stat-value.warning { color: #f39c12; }
-        .stat-value.lost { color: #e67e22; }
-        .stat-value.info { color: #3498db; }
+    .health-score.good {
+      color: #2ecc71;
+    }
 
-        .stat-label {
-            color: #666;
-            font-size: 0.9rem;
-        }
+    .health-score.fair {
+      color: #f39c12;
+    }
 
-        .tabs {
-            display: flex;
-            background: white;
-            border-radius: 8px 8px 0 0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 0;
-        }
+    .health-score.poor {
+      color: #e74c3c;
+    }
 
-        .tab {
-            flex: 1;
-            padding: 1rem;
-            text-align: center;
-            background: #f8f9fa;
-            border: none;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-        }
+    .health-label {
+      font-size: 1.2rem;
+      color: #666;
+      margin-bottom: 1rem;
+    }
 
-        .tab:first-child {
-            border-radius: 8px 0 0 0;
-        }
+    .health-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
 
-        .tab:last-child {
-            border-radius: 0 8px 0 0;
-        }
+    .metric {
+      text-align: center;
+    }
 
-        .tab.active {
-            background: white;
-            color: #667eea;
-            font-weight: bold;
-        }
+    .metric-value {
+      font-size: 1.8rem;
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
 
-        .tab:hover:not(.active) {
-            background: #e9ecef;
-        }
+    .metric-value.success {
+      color: #27ae60;
+    }
 
-        .tab-content {
-            display: none;
-            background: white;
-            padding: 2rem;
-            border-radius: 0 0 8px 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
+    .metric-value.failed {
+      color: #e74c3c;
+    }
 
-        .tab-content.active {
-            display: block;
-        }
+    .metric-value.lost {
+      color: #e67e22;
+    }
 
-        .section-title {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #2c3e50;
-        }
+    .metric-value.progress {
+      color: #3498db;
+    }
 
-        .table-container {
-            overflow-x: auto;
-            margin: 1rem 0;
-        }
+    .metric-label {
+      color: #666;
+      font-size: 0.9rem;
+    }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-        }
+    /* Navigation Tabs */
+    .main-nav {
+      display: flex;
+      background: white;
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      margin-bottom: 0;
+      overflow: hidden;
+    }
 
-        th, td {
-            text-align: left;
-            padding: 0.75rem;
-            border-bottom: 1px solid #e9ecef;
-        }
+    .nav-tab {
+      flex: 1;
+      padding: 1.2rem;
+      text-align: center;
+      background: #f8f9fa;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      border-bottom: 3px solid transparent;
+    }
 
-        th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            color: #495057;
-            position: sticky;
-            top: 0;
-        }
+    .nav-tab:hover {
+      background: #e9ecef;
+    }
 
-        tr:hover {
-            background-color: #f8f9fa;
-        }
+    .nav-tab.active {
+      background: white;
+      border-bottom-color: #3498db;
+      color: #3498db;
+    }
 
-        .error-message {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 0.8rem;
-            background: #f8f9fa;
-            padding: 0.5rem;
-            border-radius: 4px;
-            border-left: 3px solid #e74c3c;
-            max-height: 200px;
-            overflow-y: auto;
-            line-height: 1.4;
-        }
+    /* Content Area */
+    .content-area {
+      background: white;
+      border-radius: 0 0 12px 12px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      min-height: 500px;
+    }
 
-        .timestamp {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 0.8rem;
-            color: #666;
-        }
+    .tab-content {
+      display: none;
+      padding: 2rem;
+    }
 
-        .job-stream {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 0.8rem;
-            background: #e9ecef;
-            padding: 0.2rem 0.4rem;
-            border-radius: 3px;
-        }
+    .tab-content.active {
+      display: block;
+    }
 
-        .no-data {
-            text-align: center;
-            color: #666;
-            font-style: italic;
-            padding: 2rem;
-        }
+    /* Quick Filters */
+    .filters {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
 
-        .export-links {
-            margin-bottom: 1rem;
-        }
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
 
-        .export-link {
-            display: inline-block;
-            margin-right: 1rem;
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-        }
+    .filter-select,
+    .filter-input {
+      padding: 0.5rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
 
-        .export-link:hover {
-            text-decoration: underline;
-        }
+    /* Status Cards */
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
 
-        .search-box {
-            width: 100%;
-            padding: 0.75rem;
-            margin-bottom: 1rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 1rem;
-        }
+    .status-card {
+      background: white;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 1.5rem;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
 
-        .filter-info {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 1rem;
-        }
+    .status-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
 
-        @media (max-width: 768px) {
-            .container {
-                padding: 10px;
-            }
-            
-            .header {
-                padding: 1rem;
-            }
-            
-            .header h1 {
-                font-size: 1.5rem;
-            }
-            
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .tabs {
-                flex-direction: column;
-            }
-            
-            .tab {
-                border-radius: 0 !important;
-            }
-            
-            .tab:first-child {
-                border-radius: 8px 8px 0 0 !important;
-            }
-            
-            .tab:last-child {
-                border-radius: 0 !important;
-            }
-        }
-    </style>
+    .status-card.success {
+      border-left: 4px solid #27ae60;
+    }
+
+    .status-card.failed {
+      border-left: 4px solid #e74c3c;
+    }
+
+    .status-card.lost {
+      border-left: 4px solid #e67e22;
+    }
+
+    .status-card.progress {
+      border-left: 4px solid #3498db;
+    }
+
+    .status-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-count {
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+
+    /* Job Lists */
+    .job-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+    }
+
+    .job-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      border-bottom: 1px solid #f8f9fa;
+      transition: background-color 0.2s ease;
+    }
+
+    .job-item:hover {
+      background-color: #f8f9fa;
+    }
+
+    .job-item:last-child {
+      border-bottom: none;
+    }
+
+    .job-info {
+      flex: 1;
+    }
+
+    .job-stream {
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.85rem;
+      color: #2c3e50;
+      margin-bottom: 0.25rem;
+    }
+
+    .job-stream a {
+      color: #3498db;
+      text-decoration: none;
+    }
+
+    .job-stream a:hover {
+      text-decoration: underline;
+    }
+
+    .job-timestamp {
+      color: #666;
+      font-size: 0.8rem;
+    }
+
+    .job-status {
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .job-status.failed {
+      background: #fee;
+      color: #c0392b;
+    }
+
+    .job-status.lost {
+      background: #fef5e7;
+      color: #d68910;
+    }
+
+    .job-status.succeeded {
+      background: #eafaf1;
+      color: #27ae60;
+    }
+
+    /* Error Analysis */
+    .error-pattern {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+
+    .error-header {
+      padding: 1rem;
+      background: #fff;
+      border-bottom: 1px solid #e9ecef;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .error-header:hover {
+      background: #f8f9fa;
+    }
+
+    .error-title {
+      font-weight: 600;
+      color: #2c3e50;
+    }
+
+    .error-count {
+      background: #e74c3c;
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    .error-details {
+      padding: 1rem;
+      background: #f8f9fa;
+      display: none;
+    }
+
+    .error-details.active {
+      display: block;
+    }
+
+    .error-pattern-text {
+      background: #fff;
+      padding: 1rem;
+      border-radius: 6px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.85rem;
+      color: #2c3e50;
+      border: 1px solid #ddd;
+      margin-bottom: 1rem;
+      white-space: pre-wrap;
+    }
+
+    .affected-jobs {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 0.5rem;
+    }
+
+    .affected-job {
+      padding: 0.5rem;
+      background: white;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.8rem;
+    }
+
+    /* Action Items */
+    .action-items {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .action-item {
+      background: white;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+
+    .action-item.critical {
+      border-left: 4px solid #e74c3c;
+      background: #fdf2f2;
+    }
+
+    .action-item.high {
+      border-left: 4px solid #f39c12;
+      background: #fefcf3;
+    }
+
+    .action-item.medium {
+      border-left: 4px solid #3498db;
+      background: #f7fbff;
+    }
+
+    .action-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .priority-badge {
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .priority-badge.critical {
+      background: #e74c3c;
+      color: white;
+    }
+
+    .priority-badge.high {
+      background: #f39c12;
+      color: white;
+    }
+
+    .priority-badge.medium {
+      background: #3498db;
+      color: white;
+    }
+
+    .action-description {
+      color: #666;
+      margin-bottom: 1rem;
+    }
+
+    .action-recommendations {
+      list-style: none;
+    }
+
+    .action-recommendations li {
+      padding: 0.25rem 0;
+      position: relative;
+      padding-left: 1.5rem;
+    }
+
+    .action-recommendations li:before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: #3498db;
+      font-weight: bold;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header {
+        padding: 1.5rem;
+      }
+
+      .header h1 {
+        font-size: 1.8rem;
+      }
+
+      .main-nav {
+        flex-direction: column;
+      }
+
+      .nav-tab {
+        padding: 1rem;
+      }
+
+      .health-metrics {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    /* Utilities */
+    .hidden {
+      display: none !important;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    .mt-1 {
+      margin-top: 0.5rem;
+    }
+
+    .mt-2 {
+      margin-top: 1rem;
+    }
+
+    .mb-1 {
+      margin-bottom: 0.5rem;
+    }
+
+    .mb-2 {
+      margin-bottom: 1rem;
+    }
+  </style>
 </head>
+
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Batch Run Analysis Dashboard</h1>
-            <div class="header-meta">
-                <strong>Batch:</strong> {{ batch_name }} |
-                {% if collection %}
-                <strong>Collection:</strong> {{ collection }} |
-                {% endif %}
-                <strong>Generated:</strong> {{ analysis_timestamp }} |
-                <strong>Time Range:</strong> {{ time_range_days }} days
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value info">{{ submitted_pipelines_count }}</div>
-                <div class="stat-label">Pipelines Submitted</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value error">{{ failed_jobs_count }}</div>
-                <div class="stat-label">Application Failures</div>
-            </div>
-            {% if lost_jobs_count > 0 %}
-            <div class="stat-card">
-                <div class="stat-value lost">{{ lost_jobs_count }}</div>
-                <div class="stat-label">Lost Jobs (Infrastructure/Timeout)</div>
-            </div>
-            {% endif %}
-            <div class="stat-card">
-                <div class="stat-value warning">{{ unhandled_exceptions_count }}</div>
-                <div class="stat-label">Unhandled Exceptions</div>
-            </div>
-            {% if unique_error_patterns_count > 0 %}
-            <div class="stat-card">
-                <div class="stat-value info">{{ unique_error_patterns_count }}</div>
-                <div class="stat-label">Unique Error Patterns</div>
-            </div>
-            {% endif %}
-            {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
-            <div class="stat-card">
-                <div class="stat-value error">{{ failed_pipelines_count }}</div>
-                <div class="stat-label">Failed Pipelines (No Job Failures)</div>
-            </div>
-            {% endif %}
-            {% if missing_aois_count is defined %}
-            <div class="stat-card">
-                <div class="stat-value error">{{ missing_aois_count }}</div>
-                <div class="stat-label">Missing AOIs</div>
-            </div>
-            {% endif %}
-            {% if missing_metrics_count is defined %}
-            <div class="stat-card">
-                <div class="stat-value warning">{{ missing_metrics_count }}</div>
-                <div class="stat-label">Missing Metrics</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value warning">{{ empty_metrics_count }}</div>
-                <div class="stat-label">Invalid Metrics</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value warning">{{ missing_agg_metrics_count }}</div>
-                <div class="stat-label">Missing Agg Metrics</div>
-            </div>
-            {% endif %}
-        </div>
-
-        <div class="tabs">
-            {% if unique_errors|length > 0 %}
-            <button class="tab active" onclick="showTab('unique-errors')">🔍 Unique Errors</button>
-            <button class="tab" onclick="showTab('failed-jobs')">📋 All Failed Jobs</button>
-            {% else %}
-            <button class="tab active" onclick="showTab('failed-jobs')">Failed Jobs</button>
-            {% endif %}
-            {% if unique_unhandled_exceptions|length > 0 %}
-            <button class="tab" onclick="showTab('unique-exceptions')">⚡ Unique Exceptions</button>
-            {% endif %}
-            <button class="tab" onclick="showTab('exceptions')">📋 All Exceptions</button>
-            {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
-            <button class="tab" onclick="showTab('failed-pipelines')">🚫 Failed Pipelines (No Job Failures)</button>
-            {% endif %}
-            {% if missing_aois_count is defined %}
-            <button class="tab" onclick="showTab('missing-aois')">Missing AOIs</button>
-            {% endif %}
-            {% if missing_metrics_count is defined %}
-            <button class="tab" onclick="showTab('metrics')">Metrics Issues</button>
-            {% endif %}
-            <button class="tab" onclick="showTab('summary')">Summary</button>
-        </div>
-
-        {% if unique_errors|length > 0 %}
-        <div id="unique-errors" class="tab-content active">
-            <h2 class="section-title">🔍 Unique Error Patterns (Optimized View)</h2>
-            <div class="export-links">
-                <a href="unique_error_patterns.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            <div style="background: #e8f4fd; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #3498db;">
-                <strong>💡 Optimization Benefits:</strong> This view shows only <strong>{{ unique_errors|length }} unique error patterns</strong> 
-                instead of {{ failed_jobs_count }} individual failed jobs, making it easier to identify root causes and prioritize fixes.
-                Each pattern shows when it first occurred and how many jobs were affected.
-            </div>
-            <input type="text" class="search-box" placeholder="Search unique error patterns..." onkeyup="filterTable('unique-errors-table', this.value)">
-            <div class="filter-info">
-                Showing <span id="unique-errors-count">{{ unique_errors|length }}</span> unique error patterns
-            </div>
-            <div class="table-container">
-                <table id="unique-errors-table">
-                    <thead>
-                        <tr>
-                            <th>Error Pattern</th>
-                            <th>Type</th>
-                            <th>Count</th>
-                            <th>First Seen</th>
-                            <th>First Job</th>
-                            <th>Affected Jobs</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for error in unique_errors %}
-                        <tr>
-                            <td>
-                                <div class="error-message">{{ error.error_pattern }}</div>
-                            </td>
-                            <td>
-                                <span style="background: #f39c12; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">
-                                    {{ error.error_type }}
-                                </span>
-                            </td>
-                            <td style="text-align: center;">
-                                <strong style="color: #e74c3c;">{{ error.occurrence_count }}</strong>
-                            </td>
-                            <td><span class="timestamp">{{ error.first_occurrence_timestamp }}</span></td>
-                            <td><span class="job-stream">{{ error.first_occurrence_job_stream }}</span></td>
-                            <td style="text-align: center;">{{ error.affected_job_streams|length }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Batch Analysis Dashboard</h1>
+      <div class="header-meta">
+        <span><strong>Batch:</strong> {{ batch_name }}</span>
+        {% if collection %}
+        <span><strong>Collection:</strong> {{ collection }}</span>
         {% endif %}
-
-        {% if unique_unhandled_exceptions|length > 0 %}
-        <div id="unique-exceptions" class="tab-content">
-            <h2 class="section-title">⚡ Unique Unhandled Exception Patterns</h2>
-            <div class="export-links">
-                <a href="unique_unhandled_exceptions.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #f39c12;">
-                <strong>⚠️ Unhandled Exceptions:</strong> These are raw exceptions not captured in JSON log format. 
-                Showing <strong>{{ unique_unhandled_exceptions|length }} unique patterns</strong> from potentially many occurrences.
-            </div>
-            <input type="text" class="search-box" placeholder="Search unique exception patterns..." onkeyup="filterTable('unique-exceptions-table', this.value)">
-            <div class="filter-info">
-                Showing <span id="unique-exceptions-count">{{ unique_unhandled_exceptions|length }}</span> unique exception patterns
-            </div>
-            <div class="table-container">
-                <table id="unique-exceptions-table">
-                    <thead>
-                        <tr>
-                            <th>Exception Pattern</th>
-                            <th>Type</th>
-                            <th>Count</th>
-                            <th>First Seen</th>
-                            <th>First Job</th>
-                            <th>Affected Jobs</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for exception in unique_unhandled_exceptions %}
-                        <tr>
-                            <td>
-                                <div class="error-message">{{ exception.error_pattern }}</div>
-                            </td>
-                            <td>
-                                <span style="background: #e74c3c; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">
-                                    {{ exception.error_type }}
-                                </span>
-                            </td>
-                            <td style="text-align: center;">
-                                <strong style="color: #e74c3c;">{{ exception.occurrence_count }}</strong>
-                            </td>
-                            <td><span class="timestamp">{{ exception.first_occurrence_timestamp }}</span></td>
-                            <td><span class="job-stream">{{ exception.first_occurrence_job_stream }}</span></td>
-                            <td style="text-align: center;">{{ exception.affected_job_streams|length }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-
-        <div id="failed-jobs" class="tab-content{% if unique_errors|length == 0 %} active{% endif %}">
-            <h2 class="section-title">Failed Jobs Analysis</h2>
-            {% if lost_jobs_count > 0 %}
-            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 1rem; margin-bottom: 1rem;">
-                <h4 style="margin: 0 0 0.5rem 0; color: #856404;">📊 Job Status Types</h4>
-                <p style="margin: 0; font-size: 0.9rem; color: #856404;">
-                    <strong>❌ Application Failures ({{ failed_jobs_count }}):</strong> Jobs that failed due to application errors, validation issues, or business logic problems.<br>
-                    <strong>🔶 Lost Jobs ({{ lost_jobs_count }}):</strong> Jobs that were marked as LOST due to infrastructure issues, timeouts, or node failures. These typically indicate system-level problems rather than application errors.
-                </p>
-            </div>
-            {% endif %}
-            <div class="export-links">
-                <a href="failed_jobs_errors.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            {% if failed_jobs|length > 0 %}
-            <input type="text" class="search-box" placeholder="Search failed jobs..." onkeyup="filterTable('failed-jobs-table', this.value)">
-            <div class="filter-info">
-                Showing <span id="failed-jobs-count">{{ failed_jobs|length }}</span> failed jobs
-            </div>
-            <div class="table-container">
-                <table id="failed-jobs-table">
-                    <thead>
-                        <tr>
-                            <th>Timestamp</th>
-                            <th>Status</th>
-                            <th>Job Stream</th>
-                            <th>Pipeline Stream</th>
-                            <th>Error Messages</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for job in failed_jobs %}
-                        <tr>
-                            <td><span class="timestamp">{{ job.timestamp or 'N/A' }}</span></td>
-                            <td>
-                                {% if job.job_status == 'LOST' %}
-                                <span style="color: #e67e22; font-weight: bold;">🔶 LOST</span>
-                                {% else %}
-                                <span style="color: #e74c3c; font-weight: bold;">❌ FAILED</span>
-                                {% endif %}
-                            </td>
-                            <td><span class="job-stream">{{ job.job_log_stream }}</span></td>
-                            <td><span class="job-stream">{{ job.pipeline_log_stream }}</span></td>
-                            <td>
-                                <div class="error-message">{{ job.error_messages|join('\n\n') }}</div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="no-data">No failed jobsFound 🎉</div>
-            {% endif %}
-        </div>
-
-        <div id="exceptions" class="tab-content">
-            <h2 class="section-title">Unhandled Exceptions</h2>
-            <div class="export-links">
-                <a href="unhandled_exceptions.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            {% if unhandled_exceptions|length > 0 %}
-            <input type="text" class="search-box" placeholder="Search exceptions..." onkeyup="filterTable('exceptions-table', this.value)">
-            <div class="filter-info">
-                Showing <span id="exceptions-count">{{ unhandled_exceptions|length }}</span> unhandled exceptions
-            </div>
-            <div class="table-container">
-                <table id="exceptions-table">
-                    <thead>
-                        <tr>
-                            <th>Job Stream</th>
-                            <th>Pipeline Stream</th>
-                            <th>Exception Messages</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for job in unhandled_exceptions %}
-                        <tr>
-                            <td><span class="job-stream">{{ job.job_log_stream }}</span></td>
-                            <td><span class="job-stream">{{ job.pipeline_log_stream }}</span></td>
-                            <td>
-                                <div class="error-message">{{ job.error_messages|join('\n\n') }}</div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="no-data">No unhandled exceptions found 🎉</div>
-            {% endif %}
-        </div>
-
-        {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
-        <div id="failed-pipelines" class="tab-content">
-            <h2 class="section-title">🚫 Failed Pipelines (No Job Failures)</h2>
-            <div class="export-links">
-                <a href="failed_pipelines.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #f39c12;">
-                <strong>⚠️ Pipeline Failures (No SUCCESS):</strong> These pipelines were submitted but never reached a SUCCESS state. 
-                <strong>{{ failed_pipelines_count }} pipelines</strong> failed, which may be due to:
-                <ul style="margin: 0.5rem 0 0 1.5rem;">
-                    <li><strong>Silent Infrastructure Failures:</strong> No job failures detected - check infrastructure, resources, or configuration</li>
-                    <li><strong>Cleanup/Finalization Failures:</strong> Jobs failed but pipeline didn't complete properly - check error handling logic</li>
-                </ul>
-            </div>
-            <input type="text" class="search-box" placeholder="Search failed pipelines..." onkeyup="filterTable('failed-pipelines-table', this.value)">
-            <div class="filter-info">
-                Showing <span id="failed-pipelines-count">{{ failed_pipelines|length }}</span> failed pipelines
-            </div>
-            <div class="table-container">
-                <table id="failed-pipelines-table">
-                    <thead>
-                        <tr>
-                            <th>AOI Name</th>
-                            <th>Pipeline Log Stream</th>
-                            <th>Batch Name</th>
-                            <th>Collection</th>
-                            <th>Timestamp</th>
-                            <th>Failure Reason</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for pipeline in failed_pipelines %}
-                        <tr>
-                            <td><strong>{{ pipeline.aoi_name }}</strong></td>
-                            <td><span class="job-stream">{{ pipeline.pipeline_log_stream }}</span></td>
-                            <td>{{ pipeline.batch_name }}</td>
-                            <td>{{ pipeline.collection or "N/A" }}</td>
-                            <td><span class="timestamp">{{ pipeline.timestamp or 'N/A' }}</span></td>
-                            <td>
-                                <span style="background: #e74c3c; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">
-                                    {{ pipeline.failure_reason }}
-                                </span>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-
-        {% if missing_aois_count is defined %}
-        <div id="missing-aois" class="tab-content">
-            <h2 class="section-title">Missing AOIs Analysis</h2>
-            <div class="export-links">
-                <a href="missing_aois.csv" class="export-link">📥 Download CSV</a>
-            </div>
-            
-            {% if missing_aois|length > 0 %}
-            <div class="card">
-                <p class="card-description">
-                    The following AOIs were expected based on the input list but have no corresponding pipeline log streams.
-                    This indicates these pipelines were never submitted or failed to start.
-                </p>
-                
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>AOI ID</th>
-                                <th>Expected Log Stream Pattern</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for aoi_id in missing_aois %}
-                            <tr>
-                                <td><code>{{ aoi_id }}</code></td>
-                                <td><code>pipeline/dispatch-[batch_name={{ batch_name }},aoi_name={{ aoi_id }},collection={% if collection %}{{ collection }}{% else %}*{% endif %}]</code></td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            {% else %}
-            <div class="no-data">All expected AOIs have corresponding pipeline logs 🎉</div>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {% if missing_metrics_count is defined %}
-        <div id="metrics" class="tab-content">
-            <h2 class="section-title">Metrics File Issues</h2>
-            <div class="export-links">
-                <a href="missing_metrics.csv" class="export-link">📥 Missing Metrics CSV</a>
-                <a href="empty_metrics.csv" class="export-link">📥 Invalid Metrics CSV</a>
-                <a href="missing_agg_metrics.csv" class="export-link">📥 Missing Agg Metrics CSV</a>
-            </div>
-            
-            {% if missing_metrics|length > 0 %}
-            <h3>Missing Metrics Files ({{ missing_metrics|length }})</h3>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Directory</th>
-                            <th>Issue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in missing_metrics %}
-                        <tr>
-                            <td><span class="job-stream">{{ item.directory }}</span></td>
-                            <td>{{ item.issue }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-
-            {% if empty_metrics|length > 0 %}
-            <h3>Invalid Metrics Files ({{ empty_metrics|length }})</h3>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>File</th>
-                            <th>Line Count</th>
-                            <th>Issue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in empty_metrics %}
-                        <tr>
-                            <td><span class="job-stream">{{ item.file }}</span></td>
-                            <td>{{ item.line_count }}</td>
-                            <td>{{ item.issue }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-
-            {% if missing_agg_metrics|length > 0 %}
-            <h3>Missing Aggregated Metrics Files ({{ missing_agg_metrics|length }})</h3>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Directory</th>
-                            <th>Expected File</th>
-                            <th>Issue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in missing_agg_metrics %}
-                        <tr>
-                            <td><span class="job-stream">{{ item.directory }}</span></td>
-                            <td><span class="job-stream">{{ item.expected_file }}</span></td>
-                            <td>{{ item.issue }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-            
-            {% if missing_metrics|length == 0 and empty_metrics|length == 0 and missing_agg_metrics|length == 0 %}
-            <div class="no-data">No metrics issues found 🎉</div>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        <div id="summary" class="tab-content">
-            <h2 class="section-title">Analysis Summary</h2>
-            <div class="export-links">
-                <a href="debug_summary.json" class="export-link">📥 Download JSON Summary</a>
-            </div>
-            
-            <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-                <h3>Batch Information</h3>
-                <p><strong>Batch Name:</strong> {{ batch_name }}</p>
-                <p><strong>Analysis Time:</strong> {{ analysis_timestamp }}</p>
-                <p><strong>Time Range:</strong> {{ time_range_days }} days</p>
-            </div>
-
-            <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-                <h3>Pipeline Statistics</h3>
-                <p><strong>Pipelines Submitted:</strong> {{ submitted_pipelines_count }}</p>
-                <p><strong>Failed Jobs:</strong> {{ failed_jobs_count }}</p>
-                {% if unique_error_patterns_count > 0 %}
-                <p><strong>🔍 Unique Error Patterns:</strong> {{ unique_error_patterns_count }} <em>(optimized from {{ failed_jobs_count }} individual errors)</em></p>
-                {% endif %}
-                <p><strong>Unhandled Exceptions:</strong> {{ unhandled_exceptions_count }}</p>
-                {% if unique_unhandled_exceptions|length > 0 %}
-                <p><strong>⚡ Unique Exception Patterns:</strong> {{ unique_unhandled_exceptions|length }}</p>
-                {% endif %}
-                {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
-                <p><strong>🚫 Failed Pipelines (No Job Failures):</strong> {{ failed_pipelines_count }} <em>(infrastructure/silent failures)</em></p>
-                {% endif %}
-                {% if missing_aois_count is defined %}
-                <p><strong>Missing AOIs (no logs):</strong> {{ missing_aois_count }}</p>
-                {% endif %}
-                {% if missing_metrics_count is defined %}
-                <p><strong>Missing Metrics Files:</strong> {{ missing_metrics_count }}</p>
-                <p><strong>Invalid Metrics Files:</strong> {{ empty_metrics_count }}</p>
-                <p><strong>Missing Agg Metrics Files:</strong> {{ missing_agg_metrics_count }}</p>
-                {% endif %}
-            </div>
-
-            {% if unique_errors|length > 0 %}
-            <div style="background: #d4edda; padding: 1.5rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #27ae60;">
-                <h3>🚀 Optimization Benefits</h3>
-                <p><strong>Query Performance:</strong> Reduced from {{ failed_jobs_count }} individual queries to bulk aggregated queries</p>
-                <p><strong>Analysis Focus:</strong> {{ unique_errors|length }} unique error patterns instead of {{ failed_jobs_count }} repetitive logs</p>
-                <p><strong>Time Savings:</strong> Focus on the first occurrence of each error type for faster debugging</p>
-                <p><strong>Human Readability:</strong> Normalized error patterns remove noise like timestamps and job-specific details</p>
-            </div>
-            {% endif %}
-
-            {% if reports_generated|length > 0 %}
-            <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-                <h3>Generated Reports</h3>
-                <ul>
-                    {% for report in reports_generated %}
-                    <li><code>{{ report }}</code></li>
-                    {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </div>
+        <span><strong>Analysis Time:</strong> {{ analysis_timestamp }}</span>
+        <span><strong>Time Range:</strong> Last {{ time_range_days }} days</span>
+      </div>
     </div>
 
-    <script>
-        function showTab(tabName) {
-            // Hide all tab contents
-            const contents = document.querySelectorAll('.tab-content');
-            contents.forEach(content => content.classList.remove('active'));
-            
-            // Remove active class from all tabs
-            const tabs = document.querySelectorAll('.tab');
-            tabs.forEach(tab => tab.classList.remove('active'));
-            
-            // Show selected tab content
-            document.getElementById(tabName).classList.add('active');
-            
-            // Add active class to clicked tab
-            event.target.classList.add('active');
-        }
+    <!-- Health Score Card -->
+    {% if executive_summary %}
+    <div class="health-score-card">
+      <div
+        class="health-score {{ 'excellent' if executive_summary.health_metrics.overall_health_score >= 90 else 'good' if executive_summary.health_metrics.overall_health_score >= 75 else 'fair' if executive_summary.health_metrics.overall_health_score >= 50 else 'poor' }}">
+        {{ executive_summary.health_metrics.overall_health_score }}
+      </div>
+      <div class="health-label">Overall Health Score</div>
 
-        function filterTable(tableId, searchTerm) {
-            const table = document.getElementById(tableId);
-            const rows = table.getElementsByTagName('tr');
-            let visibleCount = 0;
-            
-            // Start from row 1 to skip header
-            for (let i = 1; i < rows.length; i++) {
-                const row = rows[i];
-                const text = row.textContent.toLowerCase();
-                
-                if (text.includes(searchTerm.toLowerCase())) {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    row.style.display = 'none';
-                }
-            }
-            
-            // Update counter
-            const countElement = document.getElementById(tableId.replace('-table', '-count'));
-            if (countElement) {
-                countElement.textContent = visibleCount;
-            }
-        }
+      <div class="health-metrics">
+        <div class="metric">
+          <div class="metric-value success">{{ "%.1f"|format(executive_summary.health_metrics.success_rate) }}%</div>
+          <div class="metric-label">Success Rate</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value failed">{{ executive_summary.status_breakdown.failed }}</div>
+          <div class="metric-label">Failed Jobs</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value lost">{{ executive_summary.status_breakdown.lost }}</div>
+          <div class="metric-label">Infrastructure Issues</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value progress">{{ executive_summary.status_breakdown.in_progress }}</div>
+          <div class="metric-label">In Progress</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
 
-        // Initialize tooltips and interactions
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add click-to-expand functionality for error messages
-            const errorMessages = document.querySelectorAll('.error-message');
-            errorMessages.forEach(msg => {
-                if (msg.scrollHeight > msg.clientHeight) {
-                    msg.style.cursor = 'pointer';
-                    msg.title = 'Click to expand';
-                    msg.addEventListener('click', function() {
-                        if (this.style.maxHeight === 'none') {
-                            this.style.maxHeight = '200px';
-                        } else {
-                            this.style.maxHeight = 'none';
-                        }
-                    });
-                }
-            });
-        });
-    </script>
+    <!-- Main Navigation -->
+    <div class="main-nav">
+      <button class="nav-tab active" onclick="showTab('overview')">Overview</button>
+      <button class="nav-tab" onclick="showTab('failures')">Failures Analysis</button>
+      <button class="nav-tab" onclick="showTab('patterns')">Error Patterns</button>
+      <button class="nav-tab" onclick="showTab('actions')">Action Items</button>
+    </div>
+
+    <div class="content-area">
+      <!-- Overview Tab -->
+      <div id="overview" class="tab-content active">
+        <h2>Batch Overview</h2>
+
+        <div class="status-grid">
+          <div class="status-card success">
+            <div class="status-title">
+              Successful Jobs
+              <span class="status-count">{{ status_groups.success|length if status_groups else 0 }}</span>
+            </div>
+            <div class="mt-1">{{ "%.1f"|format(summary.success_rate if summary else 0) }}% of total jobs</div>
+          </div>
+
+          <div class="status-card failed">
+            <div class="status-title">
+              Application Failures
+              <span class="status-count">{{ status_groups.application_failures|length if status_groups else 0 }}</span>
+            </div>
+            <div class="mt-1">{{ "%.1f"|format(summary.failure_rate if summary else 0) }}% of total jobs</div>
+          </div>
+
+          <div class="status-card lost">
+            <div class="status-title">
+              Infrastructure Issues
+              <span class="status-count">{{ status_groups.infrastructure_issues|length if status_groups else 0 }}</span>
+            </div>
+            <div class="mt-1">{{ "%.1f"|format(summary.infrastructure_failure_rate if summary else 0) }}% of total jobs
+            </div>
+          </div>
+
+          <div class="status-card progress">
+            <div class="status-title">
+              In Progress
+              <span class="status-count">{{ status_groups.in_progress|length if status_groups else 0 }}</span>
+            </div>
+            <div class="mt-1">Jobs still running or pending</div>
+          </div>
+        </div>
+
+        {% if trend_analysis and trend_analysis.trend_available %}
+        <h3>Performance Trends</h3>
+        <div class="status-grid">
+          <div class="status-card">
+            <div class="status-title">Success Rate Trend</div>
+            <div class="mt-1">
+              Current: {{ trend_analysis.metrics.success_rate.current }}%<br>
+              Average: {{ trend_analysis.metrics.success_rate.average }}%<br>
+              Trend: {{ trend_analysis.metrics.success_rate.trend.title() }}
+            </div>
+          </div>
+          <div class="status-card">
+            <div class="status-title">Infrastructure Health</div>
+            <div class="mt-1">
+              Current Failures: {{ trend_analysis.metrics.infrastructure_failures.current }}%<br>
+              Trend: {{ trend_analysis.metrics.infrastructure_failures.trend.title() }}
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Failures Analysis Tab -->
+      <div id="failures" class="tab-content">
+        <h2>Failures Analysis</h2>
+
+        <div class="filters">
+          <div class="filter-group">
+            <label>Filter by Status:</label>
+            <select class="filter-select" id="statusFilter" onchange="filterJobs()">
+              <option value="all">All Failures</option>
+              <option value="FAILED">Application Failures</option>
+              <option value="LOST">Infrastructure Issues</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Search Jobs:</label>
+            <input type="text" class="filter-input" id="jobSearch" placeholder="Job stream name..."
+              onkeyup="filterJobs()">
+          </div>
+        </div>
+
+        <div class="job-list" id="failedJobsList">
+          {% for job in status_groups.application_failures + status_groups.infrastructure_issues if status_groups %}
+          <div class="job-item" data-status="{{ job.job_status }}" data-stream="{{ job.job_log_stream }}">
+            <div class="job-info">
+              <div class="job-stream">
+                <a href="https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/{{ job.job_log_stream|replace('/', '$252F') }}"
+                  target="_blank">
+                  {{ job.job_log_stream }}
+                </a>
+              </div>
+              <div class="job-timestamp">{{ job.timestamp }}</div>
+              <div class="mt-1">
+                <strong>Pipeline:</strong>
+                <a href="https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/{{ job.pipeline_log_stream|replace('/', '$252F') }}"
+                  target="_blank">
+                  {{ job.pipeline_log_stream }}
+                </a>
+              </div>
+            </div>
+            <div class="job-status {{ job.job_status.lower() }}">{{ job.job_status }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Error Patterns Tab -->
+      <div id="patterns" class="tab-content">
+        <h2>Error Patterns</h2>
+        <p class="mb-2">Deduplicated error patterns with occurrence counts and affected jobs.</p>
+
+        {% for error in unique_errors %}
+        <div class="error-pattern">
+          <div class="error-header" onclick="toggleErrorDetails({{ loop.index0 }})">
+            <div class="error-title">{{ error.error_pattern[:100] }}{% if error.error_pattern|length > 100 %}...{% endif
+              %}</div>
+            <div class="error-count">{{ error.occurrence_count }} jobs</div>
+          </div>
+          <div class="error-details" id="error-details-{{ loop.index0 }}">
+            <div class="error-pattern-text">{{ error.error_pattern }}</div>
+            <div class="mb-1"><strong>Error Type:</strong> {{ error.error_type }}</div>
+            <div class="mb-1"><strong>First Occurrence:</strong> {{ error.first_occurrence.timestamp }}</div>
+            <div class="mb-2"><strong>Affected Jobs ({{ error.occurrence_count }}):</strong></div>
+            <div class="affected-jobs">
+              {% for job_stream in error.affected_job_streams %}
+              <div class="affected-job">
+                <a href="https://console.aws.amazon.com/cloudwatch/home#logsV2:log-groups/log-group/{{ job_stream|replace('/', '$252F') }}"
+                  target="_blank">
+                  {{ job_stream }}
+                </a>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Action Items Tab -->
+      <div id="actions" class="tab-content">
+        <h2>Action Items</h2>
+        <p class="mb-2">Prioritized recommendations to improve batch processing performance.</p>
+
+        {% if executive_summary and executive_summary.potential_improvements %}
+        <div class="action-item">
+          <div class="action-title">
+            <span class="priority-badge medium">POTENTIAL</span>
+            Performance Improvement Opportunity
+          </div>
+          <div class="action-description">
+            By addressing the issues below, you could potentially recover {{
+            executive_summary.potential_improvements.recoverable_jobs }} jobs
+            and improve success rate from {{ executive_summary.potential_improvements.current_success_rate }}%
+            to {{ executive_summary.potential_improvements.potential_success_rate }}%.
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="action-items">
+          {% for action in action_items %}
+          <div class="action-item {{ action.priority.lower() }}">
+            <div class="action-title">
+              <span class="priority-badge {{ action.priority.lower() }}">{{ action.priority }}</span>
+              {{ action.issue }}
+            </div>
+            <div class="action-description">
+              <strong>Category:</strong> {{ action.category }}<br>
+              {{ action.recommendation }}
+              {% if action.affected_jobs > 0 %}
+              <br><strong>Impact:</strong> {{ action.affected_jobs }} jobs affected
+              {% endif %}
+            </div>
+            {% if action.actions %}
+            <ul class="action-recommendations">
+              {% for recommendation in action.actions %}
+              <li>{{ recommendation }}</li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(tabName) {
+      // Hide all tab contents
+      const contents = document.querySelectorAll('.tab-content');
+      contents.forEach(content => content.classList.remove('active'));
+
+      // Remove active class from all tabs
+      const tabs = document.querySelectorAll('.nav-tab');
+      tabs.forEach(tab => tab.classList.remove('active'));
+
+      // Show selected tab content
+      document.getElementById(tabName).classList.add('active');
+
+      // Add active class to clicked tab
+      event.target.classList.add('active');
+    }
+
+    function toggleErrorDetails(index) {
+      const details = document.getElementById(`error-details-${index}`);
+      details.classList.toggle('active');
+    }
+
+    function filterJobs() {
+      const statusFilter = document.getElementById('statusFilter').value;
+      const searchTerm = document.getElementById('jobSearch').value.toLowerCase();
+      const jobItems = document.querySelectorAll('.job-item');
+
+      jobItems.forEach(item => {
+        const status = item.getAttribute('data-status');
+        const stream = item.getAttribute('data-stream').toLowerCase();
+
+        const statusMatch = statusFilter === 'all' || status === statusFilter;
+        const searchMatch = searchTerm === '' || stream.includes(searchTerm);
+
+        if (statusMatch && searchMatch) {
+          item.style.display = 'flex';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', function () {
+      // Set initial active tab
+      showTab('overview');
+    });
+  </script>
 </body>
+
 </html>

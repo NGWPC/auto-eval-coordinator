@@ -248,9 +248,9 @@ Default pipeline jobs: {', '.join(PIPELINE_JOBS)}
     )
     parser.add_argument("--dry-run", action="store_true", help="Show what would be purged without actually doing it")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
-    parser.add_argument("--batch-size", type=int, default=50, help="Number of jobs to purge concurrently (default: 5)")
+    parser.add_argument("--batch-size", type=int, default=100, help="Number of jobs to purge concurrently (default: 5)")
     parser.add_argument(
-        "--batch-delay", type=float, default=0.2, help="Delay in seconds between batches (default: 1.0)"
+        "--batch-delay", type=float, default=0.1, help="Delay in seconds between batches (default: 1.0)"
     )
 
     args = parser.parse_args()

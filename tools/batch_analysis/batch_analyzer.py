@@ -9,6 +9,7 @@ from .html_generator import HTMLGenerator
 from .models import DebugConfig, FailedJobInfo
 from .report_generator import ReportGenerator
 from .s3_analyzer import S3MetricsAnalyzer
+from .summary_analyzer import SummaryAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,17 @@ class BatchRunAnalyzer:
         self.s3_analyzer = S3MetricsAnalyzer(config) if config.s3_output_root else None
         self.report_generator = ReportGenerator(config.output_dir)
         self.html_generator = HTMLGenerator(config.output_dir) if config.generate_html else None
+        self.summary_analyzer = SummaryAnalyzer(config.output_dir)
 
     def run_analysis(self) -> Dict[str, Any]:
-        """Run complete batch run analysis."""
+        """Run complete batch run analysis using consolidated approach."""
         logger.info(f"Starting batch run analysis for batch: {self.config.batch_name}")
 
+        # Use new comprehensive analysis method
+        logger.info("=== Comprehensive Batch Analysis ===")
+        comprehensive_results = self.cloudwatch.analyze_batch_comprehensive()
+        
+        # Extract basic info
         results = {
             "batch_name": self.config.batch_name,
             "collection": self.config.collection,
@@ -34,36 +41,22 @@ class BatchRunAnalyzer:
             "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
             "reports_generated": [],
         }
-
-        # CloudWatch analysis with optimization
-        logger.info("=== CloudWatch Analysis (Optimized) ===")
-        error_analysis = self.cloudwatch.find_failed_jobs_optimized()
-        unhandled_exceptions_unique = self.cloudwatch.find_unhandled_exceptions_optimized()
-        submitted_pipelines = self.cloudwatch.find_submitted_pipelines()
-
-        # Extract data from optimized results
-        failed_jobs = error_analysis.failed_jobs
-        unique_errors = error_analysis.unique_errors
         
-        # Count FAILED vs LOST jobs separately
-        failed_jobs_count = len([job for job in failed_jobs if job.job_status == "FAILED"])
-        lost_jobs_count = len([job for job in failed_jobs if job.job_status == "LOST"])
+        # Copy comprehensive analysis results
+        results.update(comprehensive_results)
         
-        results["failed_jobs_count"] = failed_jobs_count
-        results["lost_jobs_count"] = lost_jobs_count
-        results["total_failed_jobs_count"] = len(failed_jobs)  # Total of both FAILED and LOST
-        results["unique_error_patterns_count"] = len(unique_errors)
-        results["unhandled_exceptions_count"] = len(unhandled_exceptions_unique)
-        results["submitted_pipelines_count"] = len(submitted_pipelines)
+        # Generate executive summary
+        logger.info("=== Generating Executive Summary ===")
+        executive_summary = self.summary_analyzer.generate_executive_summary(comprehensive_results)
+        results["executive_summary"] = executive_summary
         
-        # Store unique analysis for reporting
-        results["unique_errors"] = unique_errors
-        results["unique_unhandled_exceptions"] = unhandled_exceptions_unique
-
-        # Failed pipeline analysis
-        logger.info("=== Failed Pipeline Analysis ===")
-        failed_pipelines = self.cloudwatch.find_failed_pipelines()
-        results["failed_pipelines_count"] = len(failed_pipelines)
+        # Generate trend analysis
+        logger.info("=== Analyzing Trends ===")
+        trend_analysis = self.summary_analyzer.analyze_trends(comprehensive_results)
+        results["trend_analysis"] = trend_analysis
+        
+        # Save snapshot for future trend analysis
+        self.summary_analyzer.save_summary_snapshot(comprehensive_results)
 
         # AOI list comparison (if provided)
         missing_aois = []
@@ -79,39 +72,46 @@ class BatchRunAnalyzer:
                 # Find missing AOIs
                 missing_aois = self.cloudwatch.find_missing_pipelines(expected_aois)
                 results["missing_aois_count"] = len(missing_aois)
+                results["missing_aois"] = missing_aois
                 
             except Exception as e:
                 logger.error(f"Failed to process AOI list: {e}")
                 results["missing_aois_count"] = 0
+                results["missing_aois"] = []
 
-        # Generate CloudWatch reports
+        # Generate reports based on new structure
+        logger.info("=== Generating Reports ===")
+        
+        # Create legacy compatible structures for reporting
+        failed_jobs = []
+        application_failures = comprehensive_results.get("status_groups", {}).get("application_failures", [])
+        infrastructure_issues = comprehensive_results.get("status_groups", {}).get("infrastructure_issues", [])
+        
+        for job in application_failures + infrastructure_issues:
+            job_stream = job["job_log_stream"]
+            error_messages = comprehensive_results.get("detailed_errors", {}).get(job_stream, [])
+            
+            failed_jobs.append(
+                FailedJobInfo(
+                    pipeline_log_stream=job["pipeline_log_stream"],
+                    job_log_stream=job_stream,
+                    error_messages=error_messages or ["No error messages found"],
+                    timestamp=job.get("timestamp"),
+                    job_status=job["job_status"]
+                )
+            )
+
+        # Get unique errors and failed pipelines from results
+        unique_errors = comprehensive_results.get("unique_errors", [])
+        failed_pipelines = comprehensive_results.get("failed_pipelines", [])
+
+        # Generate reports
         if failed_jobs:
             report_file = self.report_generator.generate_failed_jobs_report(failed_jobs)
             results["reports_generated"].append(report_file)
 
-        # Generate unique error pattern reports (new optimized reports)
         if unique_errors:
             report_file = self.report_generator.generate_unique_errors_report(unique_errors)
-            results["reports_generated"].append(report_file)
-
-        # Initialize unhandled_exceptions list for HTML generator
-        unhandled_exceptions = []
-        
-        if unhandled_exceptions_unique:
-            # Generate unique exceptions report
-            report_file = self.report_generator.generate_unique_exceptions_report(unhandled_exceptions_unique)
-            results["reports_generated"].append(report_file)
-            
-            # Also generate legacy format for compatibility
-            for unique_exc in unhandled_exceptions_unique:
-                unhandled_exceptions.append(
-                    FailedJobInfo(
-                        pipeline_log_stream=unique_exc.first_occurrence_pipeline_stream,
-                        job_log_stream=unique_exc.first_occurrence_job_stream,
-                        error_messages=[unique_exc.sample_raw_message]
-                    )
-                )
-            report_file = self.report_generator.generate_unhandled_exceptions_report(unhandled_exceptions)
             results["reports_generated"].append(report_file)
 
         # Generate missing AOIs report
@@ -145,6 +145,11 @@ class BatchRunAnalyzer:
             )
             results["reports_generated"].extend(metrics_reports)
 
+        # Generate comprehensive job status reports
+        logger.info("=== Generating Job Status Reports ===")
+        status_reports = self.report_generator.generate_comprehensive_status_reports(results)
+        results["reports_generated"].extend(status_reports)
+
         # Generate summary
         summary_file = self.report_generator.generate_summary_report(results)
         results["reports_generated"].append(summary_file)
@@ -155,13 +160,13 @@ class BatchRunAnalyzer:
             html_file = self.html_generator.generate_dashboard(
                 results,
                 failed_jobs,
-                unhandled_exceptions,
+                [],  # unhandled_exceptions (empty for now)
                 missing_metrics if self.s3_analyzer else None,
                 empty_metrics if self.s3_analyzer else None,
                 missing_agg if self.s3_analyzer else None,
                 missing_aois if missing_aois else None,
                 unique_errors,
-                unhandled_exceptions_unique,
+                [],  # unique_unhandled_exceptions (empty for now)
                 failed_pipelines,
             )
             results["reports_generated"].append(html_file)

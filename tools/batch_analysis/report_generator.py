@@ -269,3 +269,176 @@ class ReportGenerator:
 
         logger.info(f"Generated failed pipelines report: {output_file}")
         return str(output_file)
+
+    def generate_job_status_summary_report(self, analysis_results: Dict[str, Any]) -> str:
+        """Generate comprehensive CSV report of job status summary."""
+        output_file = self.output_dir / "job_status_summary.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = [
+                "status", 
+                "count", 
+                "percentage",
+                "description"
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            
+            status_descriptions = {
+                "succeeded": "Jobs that completed successfully",
+                "failed": "Jobs that failed due to application errors",
+                "lost": "Jobs that were lost due to infrastructure issues",
+                "pending": "Jobs waiting to be allocated and run",
+                "running": "Jobs currently executing",
+                "dispatched": "Jobs dispatched but not yet allocated",
+                "stopped": "Jobs that were intentionally stopped",
+                "cancelled": "Jobs that were cancelled",
+                "unknown": "Jobs with undetermined status"
+            }
+            
+            status_counts = {
+                "succeeded": analysis_results.get("succeeded_jobs_count", 0),
+                "failed": analysis_results.get("failed_jobs_count", 0),
+                "lost": analysis_results.get("lost_jobs_count", 0),
+                "pending": analysis_results.get("pending_jobs_count", 0),
+                "running": analysis_results.get("running_jobs_count", 0),
+                "dispatched": analysis_results.get("dispatched_jobs_count", 0),
+                "stopped": analysis_results.get("stopped_jobs_count", 0),
+                "cancelled": analysis_results.get("cancelled_jobs_count", 0),
+                "unknown": analysis_results.get("unknown_jobs_count", 0),
+            }
+            
+            percentages = analysis_results.get("status_percentages", {})
+            
+            for status, count in status_counts.items():
+                writer.writerow({
+                    "status": status.upper(),
+                    "count": count,
+                    "percentage": f"{percentages.get(status, 0)}%",
+                    "description": status_descriptions.get(status, "")
+                })
+
+        logger.info(f"Generated job status summary report: {output_file}")
+        return str(output_file)
+
+    def generate_succeeded_jobs_report(self, succeeded_jobs: List[Dict]) -> str:
+        """Generate CSV report of succeeded jobs."""
+        output_file = self.output_dir / "succeeded_jobs.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for job in succeeded_jobs:
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_status": job.get("job_status", "SUCCEEDED")
+                })
+
+        logger.info(f"Generated succeeded jobs report: {output_file}")
+        return str(output_file)
+
+    def generate_pending_jobs_report(self, pending_jobs: List[Dict]) -> str:
+        """Generate CSV report of pending jobs (potentially stuck)."""
+        output_file = self.output_dir / "pending_jobs.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "investigation_notes"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for job in pending_jobs:
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_status": job.get("job_status", "PENDING"),
+                    "investigation_notes": "Job may be stuck waiting for resources. Check Nomad cluster capacity and allocation queue."
+                })
+
+        logger.info(f"Generated pending jobs report: {output_file}")
+        return str(output_file)
+
+    def generate_running_jobs_report(self, running_jobs: List[Dict]) -> str:
+        """Generate CSV report of running jobs (potentially long-running)."""
+        output_file = self.output_dir / "running_jobs.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "investigation_notes"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for job in running_jobs:
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_status": job.get("job_status", "RUNNING"),
+                    "investigation_notes": "Job is still running. If this is an old job, check for potential hangs or infinite loops."
+                })
+
+        logger.info(f"Generated running jobs report: {output_file}")
+        return str(output_file)
+
+    def generate_stopped_cancelled_jobs_report(self, stopped_jobs: List[Dict], cancelled_jobs: List[Dict]) -> str:
+        """Generate CSV report of stopped and cancelled jobs."""
+        output_file = self.output_dir / "stopped_cancelled_jobs.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "reason"]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            
+            for job in stopped_jobs:
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_status": job.get("job_status", "STOPPED"),
+                    "reason": "Job was intentionally stopped or terminated"
+                })
+            
+            for job in cancelled_jobs:
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_status": job.get("job_status", "CANCELLED"),
+                    "reason": "Job was cancelled before completion"
+                })
+
+        logger.info(f"Generated stopped/cancelled jobs report: {output_file}")
+        return str(output_file)
+
+    def generate_comprehensive_status_reports(self, analysis_results: Dict[str, Any]) -> List[str]:
+        """Generate all job status reports."""
+        reports = []
+        
+        # Generate job status summary
+        summary_report = self.generate_job_status_summary_report(analysis_results)
+        reports.append(summary_report)
+        
+        jobs_by_status = analysis_results.get("jobs_by_status", {})
+        
+        # Generate reports for each status type if they have jobs
+        if jobs_by_status.get("SUCCEEDED"):
+            reports.append(self.generate_succeeded_jobs_report(jobs_by_status["SUCCEEDED"]))
+        
+        if jobs_by_status.get("PENDING"):
+            reports.append(self.generate_pending_jobs_report(jobs_by_status["PENDING"]))
+        
+        if jobs_by_status.get("RUNNING"):
+            reports.append(self.generate_running_jobs_report(jobs_by_status["RUNNING"]))
+        
+        if jobs_by_status.get("STOPPED") or jobs_by_status.get("CANCELLED"):
+            reports.append(self.generate_stopped_cancelled_jobs_report(
+                jobs_by_status.get("STOPPED", []), 
+                jobs_by_status.get("CANCELLED", [])
+            ))
+        
+        return reports

@@ -113,7 +113,7 @@ job "pipeline" {
       }
 
       resources {
-        memory = 4000 
+        memory = 6000  # 6 GB seems to be necessary to avoid OOM on some jobs
       }
 
       logs {

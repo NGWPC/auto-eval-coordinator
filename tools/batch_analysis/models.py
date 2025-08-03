@@ -1,7 +1,21 @@
 """Data models for batch analysis."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class JobStatus(Enum):
+    """Job status enumeration aligned with Nomad JobStatus values."""
+    DISPATCHED = "dispatched"
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    LOST = "lost"
+    STOPPED = "stopped"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -20,8 +34,20 @@ class DebugConfig:
 
 
 @dataclass
+class JobInfo:
+    """Information about a job with any status."""
+
+    pipeline_log_stream: str
+    job_log_stream: str
+    job_status: JobStatus
+    timestamp: Optional[str] = None
+    error_messages: Optional[List[str]] = None
+    exit_code: Optional[int] = None
+
+
+@dataclass
 class FailedJobInfo:
-    """Information about a failed or lost job."""
+    """Information about a failed or lost job (legacy compatibility)."""
 
     pipeline_log_stream: str
     job_log_stream: str
@@ -54,6 +80,21 @@ class FailedPipelineInfo:
     collection: Optional[str]
     timestamp: Optional[str] = None
     failure_reason: str = "No 'INFO Pipeline SUCCESS' message found"
+
+
+@dataclass
+class JobStatusAnalysisResult:
+    """Results from comprehensive job status analysis."""
+
+    all_jobs: List[JobInfo]
+    jobs_by_status: Dict[JobStatus, List[JobInfo]]
+    status_counts: Dict[JobStatus, int]
+    
+    # Legacy compatibility
+    failed_jobs: List[FailedJobInfo]
+    unique_errors: List[UniqueErrorInfo]
+    unhandled_exceptions: List[FailedJobInfo]
+    unique_unhandled_exceptions: List[UniqueErrorInfo]
 
 
 @dataclass

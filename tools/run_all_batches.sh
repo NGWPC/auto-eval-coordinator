@@ -55,11 +55,11 @@ get_nomad_memory_usage_percentage() {
 }
 
 start_nomad_gc() {
-    echo "Starting Nomad garbage collection background process (triggered when memory >= 30%)..."
+    echo "Starting Nomad garbage collection background process (triggered when memory >= 20%)..."
     (
         while true; do
             local memory_usage=$(get_nomad_memory_usage_percentage)
-            if [[ $? -eq 0 && $memory_usage -ge 30 ]]; then
+            if [[ $? -eq 0 && $memory_usage -ge 20 ]]; then
                 echo "$(date): Nomad memory usage at ${memory_usage}% - Running nomad system gc"
                 nomad system gc
             elif [[ $? -ne 0 ]]; then

@@ -9,7 +9,7 @@ from typing import Dict, List, Set
 import boto3
 
 from .error_patterns import ErrorPatternExtractor
-from .models import DebugConfig, ErrorAnalysisResult, FailedJobInfo, FailedPipelineInfo, UniqueErrorInfo
+from .models import DebugConfig, ErrorAnalysisResult, FailedJobInfo, FailedPipelineInfo, UniqueErrorInfo, JobInfo, JobStatus, JobStatusAnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -51,153 +51,7 @@ class CloudWatchAnalyzer:
             logger.error(f"Error running query on {log_group}: {e}")
             return []
 
-    def find_failed_jobs(self) -> List[FailedJobInfo]:
-        """Find all failed jobs and extract their error information."""
-        logger.info("Step 1: Finding failed jobs...")
 
-        # Build filter pattern based on whether collection is specified
-        if self.config.collection:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
-        else:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
-
-        # Query to find failed jobs with job stream names
-        failed_jobs_query = f"""
-        fields @timestamp, @logStream as pipeline_log_stream, @message
-        | parse @message 'Job * ' as job_stream_name
-        | parse @message 'JobStatus.*' as job_status_raw
-        | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.(FAILED|LOST)/
-        | sort @timestamp desc
-        | display @timestamp, pipeline_log_stream, job_stream_name, job_status_raw
-        """
-
-        failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
-
-        if not failed_job_results:
-            logger.warning("No failed jobs found")
-            return []
-
-        logger.info(f"Found {len(failed_job_results)} failed jobs. Analyzing errors...")
-
-        failed_jobs = []
-        for job in failed_job_results:
-            timestamp = self._get_field_value(job, "@timestamp")
-            pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
-            job_stream = self._get_field_value(job, "job_stream_name", "").strip()
-            job_status_raw = self._get_field_value(job, "job_status_raw", "")
-            
-            # Extract the status (FAILED or LOST) from the raw status string
-            job_status = "FAILED"  # default
-            if "LOST" in job_status_raw:
-                job_status = "LOST"
-            elif "FAILED" in job_status_raw:
-                job_status = "FAILED"
-
-            if not job_stream or job_stream == "N/A":
-                continue
-
-            logger.info(f"Analyzing errors for job: {job_stream} (status: {job_status})")
-
-            # Query for error messages in the specific job stream
-            error_query = f"""
-            fields @timestamp, @message
-            | filter @logStream = "{job_stream}" and @message like /"level": "ERROR"/
-            | sort @timestamp asc
-            """
-
-            error_results = self.run_query(self.config.job_log_group, error_query)
-
-            error_messages = []
-            if error_results:
-                for result in error_results:
-                    message = self._get_field_value(result, "@message")
-                    if message and message != "Parse Error":
-                        error_messages.append(message)
-            else:
-                error_messages.append("No 'ERROR' level messages found in job log stream")
-
-            failed_jobs.append(
-                FailedJobInfo(
-                    pipeline_log_stream=pipeline_stream,
-                    job_log_stream=job_stream,
-                    error_messages=error_messages,
-                    timestamp=timestamp,
-                    job_status=job_status,
-                )
-            )
-
-        return failed_jobs
-
-    def find_unhandled_exceptions(self) -> List[FailedJobInfo]:
-        """Find jobs with unhandled exceptions (non-JSON formatted errors)."""
-        logger.info("Finding unhandled exceptions...")
-
-        # Build filter pattern based on whether collection is specified
-        if self.config.collection:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
-        else:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
-
-        # First get failed jobs
-        failed_jobs_query = f"""
-        fields @logStream as pipeline_log_stream, @message
-        | parse @message 'Job * ' as job_stream_name
-        | parse @message 'JobStatus.*' as job_status_raw
-        | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.(FAILED|LOST)/
-        | display pipeline_log_stream, job_stream_name, job_status_raw
-        """
-
-        failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
-
-        if not failed_job_results:
-            return []
-
-        unhandled_exceptions = []
-        for job in failed_job_results:
-            pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
-            job_stream = self._get_field_value(job, "job_stream_name", "").strip()
-            job_status_raw = self._get_field_value(job, "job_status_raw", "")
-            
-            # Extract the status (FAILED or LOST) from the raw status string
-            job_status = "FAILED"  # default
-            if "LOST" in job_status_raw:
-                job_status = "LOST"
-            elif "FAILED" in job_status_raw:
-                job_status = "FAILED"
-
-            if not job_stream or job_stream == "N/A":
-                continue
-
-            # Query for non-JSON error messages
-            unhandled_error_query = f"""
-            fields @timestamp, @message
-            | filter @logStream = "{job_stream}"
-                and @message not like /^{{/
-                and @message like /(?i)traceback|exception|error|fail|fatal/
-            | sort @timestamp asc
-            """
-
-            unhandled_error_results = self.run_query(self.config.job_log_group, unhandled_error_query)
-
-            error_messages = []
-            if unhandled_error_results:
-                for result in unhandled_error_results:
-                    message = self._get_field_value(result, "@message")
-                    if message and message != "Parse Error":
-                        error_messages.append(message)
-            else:
-                error_messages.append("No non-JSON error messages found")
-
-            if error_messages and error_messages != ["No non-JSON error messages found"]:
-                unhandled_exceptions.append(
-                    FailedJobInfo(
-                        pipeline_log_stream=pipeline_stream, job_log_stream=job_stream, error_messages=error_messages, job_status=job_status
-                    )
-                )
-
-        return unhandled_exceptions
 
     def find_submitted_pipelines(self) -> Set[str]:
         """Find all pipelines that were submitted for this batch."""
@@ -279,254 +133,7 @@ class CloudWatchAnalyzer:
                 return field.get("value", default)
         return default
 
-    def find_failed_jobs_optimized(self) -> ErrorAnalysisResult:
-        """
-        Find failed jobs and analyze errors with deduplication and first-occurrence optimization.
-        This replaces the N+1 query pattern with efficient aggregated queries.
-        """
-        logger.info("Step 1: Finding failed jobs with optimized error analysis...")
 
-        # Build filter pattern based on whether collection is specified
-        if self.config.collection:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
-        else:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
-
-        # Single query to get all failed jobs
-        failed_jobs_query = f"""
-        fields @timestamp, @logStream as pipeline_log_stream, @message
-        | parse @message 'Job * ' as job_stream_name
-        | parse @message 'JobStatus.*' as job_status_raw
-        | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.(FAILED|LOST)/
-        | sort @timestamp desc
-        """
-
-        failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
-
-        if not failed_job_results:
-            logger.warning("No failed jobs found")
-            return ErrorAnalysisResult([], [], [], [])
-
-        logger.info(f"Found {len(failed_job_results)} failed jobs. Running bulk error analysis...")
-
-        # Extract job stream names
-        job_streams = []
-        job_stream_to_pipeline = {}
-        job_stream_to_timestamp = {}
-        job_stream_to_status = {}
-
-        for job in failed_job_results:
-            pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
-            job_stream = self._get_field_value(job, "job_stream_name", "").strip()
-            timestamp = self._get_field_value(job, "@timestamp")
-            job_status_raw = self._get_field_value(job, "job_status_raw", "")
-            
-            # Extract the status (FAILED or LOST) from the raw status string
-            job_status = "FAILED"  # default
-            if "LOST" in job_status_raw:
-                job_status = "LOST"
-            elif "FAILED" in job_status_raw:
-                job_status = "FAILED"
-
-            if job_stream and job_stream != "N/A":
-                job_streams.append(job_stream)
-                job_stream_to_pipeline[job_stream] = pipeline_stream
-                job_stream_to_timestamp[job_stream] = timestamp
-                job_stream_to_status[job_stream] = job_status
-
-        if not job_streams:
-            logger.warning("No valid job streams found")
-            return ErrorAnalysisResult([], [], [], [])
-
-        # Bulk query for all error messages across all failed jobs
-        # Process in chunks to avoid query size limits
-        all_error_results = []
-        chunk_size = 20
-
-        for i in range(0, len(job_streams), chunk_size):
-            chunk = job_streams[i : i + chunk_size]
-            job_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
-
-            bulk_errors_query = f"""
-            fields @timestamp, @logStream, @message
-            | filter ({job_streams_filter}) and @message like /"level": "ERROR"/
-            | sort @timestamp asc
-            """
-
-            chunk_results = self.run_query(self.config.job_log_group, bulk_errors_query)
-            all_error_results.extend(chunk_results)
-
-        # Group errors by job stream and extract patterns
-        job_errors = defaultdict(list)
-        error_patterns = defaultdict(list)
-
-        for result in all_error_results:
-            job_stream = self._get_field_value(result, "@logStream")
-            message = self._get_field_value(result, "@message")
-            timestamp = self._get_field_value(result, "@timestamp")
-
-            if message and message != "Parse Error":
-                job_errors[job_stream].append(message)
-
-                # Extract error pattern for deduplication
-                pattern, error_type = self.error_extractor.extract_json_error_pattern(message)
-
-                error_patterns[pattern].append(
-                    {
-                        "job_stream": job_stream,
-                        "pipeline_stream": job_stream_to_pipeline.get(job_stream, "unknown"),
-                        "timestamp": timestamp,
-                        "raw_message": message,
-                        "error_type": error_type,
-                    }
-                )
-
-        # Create detailed failed job list
-        failed_jobs = []
-        for job_stream in job_streams:
-            errors = job_errors.get(job_stream, ["No 'ERROR' level messages found in job log stream"])
-            failed_jobs.append(
-                FailedJobInfo(
-                    pipeline_log_stream=job_stream_to_pipeline[job_stream],
-                    job_log_stream=job_stream,
-                    error_messages=errors,
-                    timestamp=job_stream_to_timestamp.get(job_stream),
-                    job_status=job_stream_to_status.get(job_stream, "FAILED"),
-                )
-            )
-
-        # Create unique error analysis
-        unique_errors = []
-        for pattern, occurrences in error_patterns.items():
-            # Sort by timestamp to get first occurrence
-            occurrences.sort(key=lambda x: x["timestamp"])
-            first_occurrence = occurrences[0]
-
-            unique_errors.append(
-                UniqueErrorInfo(
-                    error_pattern=pattern,
-                    error_type=first_occurrence["error_type"],
-                    occurrence_count=len(occurrences),
-                    first_occurrence_timestamp=first_occurrence["timestamp"],
-                    first_occurrence_job_stream=first_occurrence["job_stream"],
-                    first_occurrence_pipeline_stream=first_occurrence["pipeline_stream"],
-                    sample_raw_message=first_occurrence["raw_message"],
-                    affected_job_streams=[occ["job_stream"] for occ in occurrences],
-                )
-            )
-
-        # Sort unique errors by occurrence count (most common first)
-        unique_errors.sort(key=lambda x: x.occurrence_count, reverse=True)
-
-        logger.info(f"Analyzed {len(failed_jobs)} failed jobs, found {len(unique_errors)} unique error patterns")
-
-        return ErrorAnalysisResult(failed_jobs, unique_errors, [], [])
-
-    def find_unhandled_exceptions_optimized(self) -> List[UniqueErrorInfo]:
-        """
-        Find unhandled exceptions with deduplication and first-occurrence optimization.
-        """
-        logger.info("Finding unhandled exceptions with optimization...")
-
-        # Build filter pattern based on whether collection is specified
-        if self.config.collection:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
-        else:
-            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
-
-        # Get failed job streams first
-        failed_jobs_query = f"""
-        fields @logStream as pipeline_log_stream, @message
-        | parse @message 'Job * ' as job_stream_name
-        | parse @message 'JobStatus.*' as job_status_raw
-        | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus.(FAILED|LOST)/
-        | display pipeline_log_stream, job_stream_name, job_status_raw
-        """
-
-        failed_job_results = self.run_query(self.config.pipeline_log_group, failed_jobs_query)
-
-        if not failed_job_results:
-            return []
-
-        job_streams = []
-        job_stream_to_pipeline = {}
-
-        for job in failed_job_results:
-            pipeline_stream = self._get_field_value(job, "pipeline_log_stream")
-            job_stream = self._get_field_value(job, "job_stream_name", "").strip()
-
-            if job_stream and job_stream != "N/A":
-                job_streams.append(job_stream)
-                job_stream_to_pipeline[job_stream] = pipeline_stream
-
-        if not job_streams:
-            return []
-
-        # Bulk query for unhandled exceptions in chunks
-        all_unhandled_results = []
-        chunk_size = 20
-
-        for i in range(0, len(job_streams), chunk_size):
-            chunk = job_streams[i : i + chunk_size]
-            job_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
-
-            unhandled_query = f"""
-            fields @timestamp, @logStream, @message
-            | filter ({job_streams_filter})
-                and @message not like /^{{/
-                and @message like /(?i)traceback|exception|error|fail|fatal/
-            | sort @timestamp asc
-            """
-
-            chunk_results = self.run_query(self.config.job_log_group, unhandled_query)
-            all_unhandled_results.extend(chunk_results)
-
-        # Group by error patterns
-        error_patterns = defaultdict(list)
-
-        for result in all_unhandled_results:
-            job_stream = self._get_field_value(result, "@logStream")
-            message = self._get_field_value(result, "@message")
-            timestamp = self._get_field_value(result, "@timestamp")
-
-            if message and message != "Parse Error":
-                pattern, error_type = self.error_extractor.extract_raw_error_pattern(message)
-
-                error_patterns[pattern].append(
-                    {
-                        "job_stream": job_stream,
-                        "pipeline_stream": job_stream_to_pipeline.get(job_stream, "unknown"),
-                        "timestamp": timestamp,
-                        "raw_message": message,
-                        "error_type": error_type,
-                    }
-                )
-
-        # Create unique unhandled exceptions
-        unique_exceptions = []
-        for pattern, occurrences in error_patterns.items():
-            occurrences.sort(key=lambda x: x["timestamp"])
-            first_occurrence = occurrences[0]
-
-            unique_exceptions.append(
-                UniqueErrorInfo(
-                    error_pattern=pattern,
-                    error_type=first_occurrence["error_type"],
-                    occurrence_count=len(occurrences),
-                    first_occurrence_timestamp=first_occurrence["timestamp"],
-                    first_occurrence_job_stream=first_occurrence["job_stream"],
-                    first_occurrence_pipeline_stream=first_occurrence["pipeline_stream"],
-                    sample_raw_message=first_occurrence["raw_message"],
-                    affected_job_streams=[occ["job_stream"] for occ in occurrences],
-                )
-            )
-
-        unique_exceptions.sort(key=lambda x: x.occurrence_count, reverse=True)
-
-        logger.info(f"Found {len(unique_exceptions)} unique unhandled exception patterns")
-        return unique_exceptions
 
     def find_failed_pipelines(self) -> List[FailedPipelineInfo]:
         """Find pipelines that failed for non-job reasons (missing 'INFO Pipeline SUCCESS' message)."""
@@ -637,3 +244,313 @@ class CloudWatchAnalyzer:
         if match:
             return match.group(1)
         return "unknown"
+
+    
+    def get_errors_for_failed_jobs_bulk(self, failed_job_streams: List[str]) -> Dict[str, List[str]]:
+        """
+        Retrieve errors for multiple failed job streams in bulk.
+        Returns a dictionary mapping job stream to error messages.
+        """
+        if not failed_job_streams:
+            return {}
+        
+        logger.info(f"Retrieving errors for {len(failed_job_streams)} failed jobs in bulk...")
+        
+        # Process in chunks to avoid query size limits
+        chunk_size = 20
+        all_errors = {}
+        
+        for i in range(0, len(failed_job_streams), chunk_size):
+            chunk = failed_job_streams[i:i + chunk_size]
+            job_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
+            
+            # Query for structured JSON errors
+            json_errors_query = f"""
+            fields @timestamp, @logStream, @message
+            | filter ({job_streams_filter})
+            | filter @message like /"level": "ERROR"/ or @message like /"level": "CRITICAL"/ or @message like /"level": "FATAL"/
+            | sort @logStream, @timestamp asc
+            """
+            
+            json_results = self.run_query(self.config.job_log_group, json_errors_query)
+            
+            # Query for unhandled exceptions (non-JSON)
+            unhandled_errors_query = f"""
+            fields @timestamp, @logStream, @message
+            | filter ({job_streams_filter})
+            | filter @message not like /^{{/
+            | filter @message like /(?i)traceback|exception|error:|fail:|fatal:|critical:/
+            | sort @logStream, @timestamp asc
+            """
+            
+            unhandled_results = self.run_query(self.config.job_log_group, unhandled_errors_query)
+            
+            # Combine and process results
+            for result in json_results + unhandled_results:
+                job_stream = self._get_field_value(result, "@logStream")
+                message = self._get_field_value(result, "@message")
+                
+                if message and message != "Parse Error":
+                    if job_stream not in all_errors:
+                        all_errors[job_stream] = []
+                    if message not in all_errors[job_stream]:  # Avoid duplicates
+                        all_errors[job_stream].append(message)
+        
+        # Ensure all requested streams have an entry
+        for stream in failed_job_streams:
+            if stream not in all_errors:
+                all_errors[stream] = ["No error messages found in job log stream"]
+        
+        return all_errors
+    
+    def find_all_jobs_consolidated(self) -> Dict[str, Any]:
+        """
+        Find all jobs and their statuses in a single consolidated query.
+        Returns comprehensive job information with better status grouping.
+        """
+        logger.info("Running consolidated job status query...")
+        
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+        
+        # Single comprehensive query to get all job statuses and error details
+        consolidated_query = f"""
+        fields @timestamp, @logStream as pipeline_log_stream, @message
+        | parse @message 'Job * ' as job_stream_name
+        | parse @message 'JobStatus.*' as job_status_raw
+        | parse @message 'exit_code=*' as exit_code_str
+        | filter @logStream like {stream_filter}
+        | filter @message like /JobStatus\./
+        | sort @timestamp desc
+        """
+        
+        results = self.run_query(self.config.pipeline_log_group, consolidated_query)
+        
+        # Process results into structured format
+        jobs_by_stream = {}
+        all_jobs = []
+        
+        for result in results:
+            timestamp = self._get_field_value(result, "@timestamp")
+            pipeline_stream = self._get_field_value(result, "pipeline_log_stream")
+            job_stream = self._get_field_value(result, "job_stream_name", "").strip()
+            job_status_raw = self._get_field_value(result, "job_status_raw", "")
+            exit_code_str = self._get_field_value(result, "exit_code_str", "")
+            
+            if not job_stream or job_stream == "N/A":
+                continue
+            
+            # Extract status from raw string
+            job_status = "UNKNOWN"
+            for status in ["DISPATCHED", "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "LOST", "STOPPED", "CANCELLED"]:
+                if status in job_status_raw:
+                    job_status = status
+                    break
+            
+            # Extract exit code if available
+            exit_code = None
+            if exit_code_str and exit_code_str != "N/A":
+                try:
+                    exit_code = int(exit_code_str.split(",")[0].strip())
+                except:
+                    pass
+            
+            job_info = {
+                "timestamp": timestamp,
+                "pipeline_log_stream": pipeline_stream,
+                "job_log_stream": job_stream,
+                "job_status": job_status,
+                "exit_code": exit_code,
+                "job_status_raw": job_status_raw
+            }
+            
+            # Keep only the latest status for each job
+            if job_stream not in jobs_by_stream or timestamp > jobs_by_stream[job_stream]["timestamp"]:
+                jobs_by_stream[job_stream] = job_info
+        
+        # Convert to list
+        all_jobs = list(jobs_by_stream.values())
+        
+        # Group by status categories
+        status_groups = {
+            "success": [],
+            "application_failures": [],  # FAILED (exit code != 0)
+            "infrastructure_issues": [],  # LOST (timeout/node failures)
+            "intentional_stops": [],      # STOPPED, CANCELLED
+            "in_progress": [],            # PENDING, RUNNING, DISPATCHED
+            "unknown": []
+        }
+        
+        # Also maintain raw status groups for compatibility
+        jobs_by_status = {status: [] for status in ["DISPATCHED", "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "LOST", "STOPPED", "CANCELLED", "UNKNOWN"]}
+        
+        for job in all_jobs:
+            status = job["job_status"]
+            jobs_by_status[status].append(job)
+            
+            # Categorize into groups
+            if status == "SUCCEEDED":
+                status_groups["success"].append(job)
+            elif status == "FAILED":
+                status_groups["application_failures"].append(job)
+            elif status == "LOST":
+                status_groups["infrastructure_issues"].append(job)
+            elif status in ["STOPPED", "CANCELLED"]:
+                status_groups["intentional_stops"].append(job)
+            elif status in ["PENDING", "RUNNING", "DISPATCHED"]:
+                status_groups["in_progress"].append(job)
+            else:
+                status_groups["unknown"].append(job)
+        
+        # Calculate summary statistics
+        total_jobs = len(all_jobs)
+        terminal_jobs = len(status_groups["success"]) + len(status_groups["application_failures"]) + \
+                       len(status_groups["infrastructure_issues"]) + len(status_groups["intentional_stops"])
+        
+        summary = {
+            "total_jobs": total_jobs,
+            "terminal_jobs": terminal_jobs,
+            "in_progress_jobs": len(status_groups["in_progress"]),
+            "success_rate": round((len(status_groups["success"]) / total_jobs * 100), 2) if total_jobs > 0 else 0,
+            "failure_rate": round((len(status_groups["application_failures"]) / total_jobs * 100), 2) if total_jobs > 0 else 0,
+            "infrastructure_failure_rate": round((len(status_groups["infrastructure_issues"]) / total_jobs * 100), 2) if total_jobs > 0 else 0,
+        }
+        
+        logger.info(f"Consolidated query found {total_jobs} jobs: "
+                   f"{len(status_groups['success'])} succeeded, "
+                   f"{len(status_groups['application_failures'])} failed, "
+                   f"{len(status_groups['infrastructure_issues'])} lost, "
+                   f"{len(status_groups['in_progress'])} in progress")
+        
+        return {
+            "all_jobs": all_jobs,
+            "jobs_by_status": jobs_by_status,
+            "status_groups": status_groups,
+            "summary": summary
+        }
+    
+    def analyze_batch_comprehensive(self) -> Dict[str, Any]:
+        """
+        Comprehensive batch analysis with consolidated queries and improved grouping.
+        This replaces multiple separate queries with efficient bulk operations.
+        """
+        logger.info("Starting comprehensive batch analysis...")
+        
+        # Step 1: Get all jobs and their statuses in one query
+        job_analysis = self.find_all_jobs_consolidated()
+        all_jobs = job_analysis["all_jobs"]
+        status_groups = job_analysis["status_groups"]
+        summary = job_analysis["summary"]
+        
+        # Step 2: Get errors for all failed/lost jobs in bulk
+        failed_jobs = status_groups["application_failures"] + status_groups["infrastructure_issues"]
+        failed_job_streams = [job["job_log_stream"] for job in failed_jobs]
+        
+        error_messages_by_stream = {}
+        if failed_job_streams:
+            error_messages_by_stream = self.get_errors_for_failed_jobs_bulk(failed_job_streams)
+        
+        # Step 3: Analyze error patterns and create unique error analysis
+        error_patterns = defaultdict(list)
+        
+        for job in failed_jobs:
+            job_stream = job["job_log_stream"]
+            error_messages = error_messages_by_stream.get(job_stream, [])
+            
+            for message in error_messages:
+                pattern, error_type = self.error_extractor.extract_json_error_pattern(message)
+                
+                error_patterns[pattern].append({
+                    "job_stream": job_stream,
+                    "pipeline_stream": job["pipeline_log_stream"],
+                    "timestamp": job["timestamp"],
+                    "raw_message": message,
+                    "error_type": error_type,
+                    "job_status": job["job_status"],
+                    "exit_code": job.get("exit_code")
+                })
+        
+        # Create unique error summary
+        unique_errors = []
+        for pattern, occurrences in error_patterns.items():
+            # Sort by timestamp to get first occurrence
+            occurrences.sort(key=lambda x: x["timestamp"])
+            first_occurrence = occurrences[0]
+            
+            # Group affected jobs by status
+            failed_count = len([o for o in occurrences if o["job_status"] == "FAILED"])
+            lost_count = len([o for o in occurrences if o["job_status"] == "LOST"])
+            
+            unique_errors.append({
+                "error_pattern": pattern,
+                "error_type": first_occurrence["error_type"],
+                "occurrence_count": len(occurrences),
+                "failed_job_count": failed_count,
+                "lost_job_count": lost_count,
+                "first_occurrence": {
+                    "timestamp": first_occurrence["timestamp"],
+                    "job_stream": first_occurrence["job_stream"],
+                    "pipeline_stream": first_occurrence["pipeline_stream"],
+                },
+                "sample_raw_message": first_occurrence["raw_message"],
+                "affected_job_streams": [o["job_stream"] for o in occurrences],
+            })
+        
+        # Sort by total occurrence count
+        unique_errors.sort(key=lambda x: x["occurrence_count"], reverse=True)
+        
+        # Step 4: Check pipeline health
+        submitted_pipelines = self.find_submitted_pipelines()
+        failed_pipelines = self.find_failed_pipelines()
+        
+        # Step 5: Create actionable insights
+        action_items = []
+        
+        # High-priority: Infrastructure issues
+        if len(status_groups["infrastructure_issues"]) > 0:
+            action_items.append({
+                "priority": "HIGH",
+                "category": "Infrastructure",
+                "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues",
+                "recommendation": "Check Nomad cluster health, node availability, and timeout settings",
+                "affected_jobs": len(status_groups["infrastructure_issues"])
+            })
+        
+        # High-priority: Common application errors
+        for error in unique_errors[:3]:  # Top 3 errors
+            if error["occurrence_count"] >= 5:
+                action_items.append({
+                    "priority": "HIGH",
+                    "category": "Application Error",
+                    "issue": f"Error pattern affecting {error['occurrence_count']} jobs: {error['error_pattern'][:100]}",
+                    "recommendation": "Fix this common error pattern to improve success rate",
+                    "affected_jobs": error["occurrence_count"]
+                })
+        
+        # Medium-priority: Failed pipelines
+        if len(failed_pipelines) > 0:
+            action_items.append({
+                "priority": "MEDIUM",
+                "category": "Pipeline Health",
+                "issue": f"{len(failed_pipelines)} pipelines failed without job failures",
+                "recommendation": "Check pipeline orchestration logic and error handling",
+                "affected_jobs": 0
+            })
+        
+        logger.info(f"Comprehensive analysis complete: {summary['total_jobs']} jobs analyzed, "
+                   f"{len(unique_errors)} unique error patterns found, "
+                   f"{len(action_items)} action items identified")
+        
+        return {
+            "summary": summary,
+            "status_groups": status_groups,
+            "jobs_by_status": job_analysis["jobs_by_status"],
+            "unique_errors": unique_errors,
+            "failed_pipelines": failed_pipelines,
+            "submitted_pipelines": submitted_pipelines,
+            "action_items": action_items,
+            "detailed_errors": error_messages_by_stream
+        }
