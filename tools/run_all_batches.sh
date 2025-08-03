@@ -38,25 +38,40 @@ TIMESTAMP=$(date +"%Y-%m-%d-%H")
 
 get_nomad_memory_usage_percentage() {
     # Get memory usage from Nomad server using operator metrics
-    local alloc_bytes sys_bytes
+    local metrics_json
     
     # Get allocated and system memory from Nomad metrics using jq
-    alloc_bytes=$(nomad operator metrics -json 2>/dev/null | jq -r '.Gauges[] | select(.Name == "nomad.runtime.alloc_bytes") | .Value')
-    sys_bytes=$(nomad operator metrics -json 2>/dev/null | jq -r '.Gauges[] | select(.Name == "nomad.runtime.sys_bytes") | .Value')
+    # Note: nomad can print "Unable to retrieve credentials" to stderr even when successful
+    if ! metrics_json=$(nomad operator metrics -json 2>&1 | grep -v "Unable to retrieve credentials"); then
+        echo "Error: 'nomad operator metrics' command failed" >&2
+        return 1
+    fi
+
+    local alloc_bytes
+    alloc_bytes=$(echo "$metrics_json" | jq -r '.Gauges[] | select(.Name == "nomad.runtime.alloc_bytes") | .Value')
     
-    if [[ -z "$alloc_bytes" || -z "$sys_bytes" || "$alloc_bytes" == "null" || "$sys_bytes" == "null" ]]; then
-        echo "Error: Could not parse memory metrics" >&2
+    local sys_bytes
+    sys_bytes=$(echo "$metrics_json" | jq -r '.Gauges[] | select(.Name == "nomad.runtime.sys_bytes") | .Value')
+    
+    if [[ -z "$alloc_bytes" || "$alloc_bytes" == "null" || -z "$sys_bytes" || "$sys_bytes" == "null" ]]; then
+        echo "Error: Could not parse memory metrics from Nomad. Raw metrics JSON:" >&2
+        echo "$metrics_json" >&2
         return 1
     fi
     
     # Calculate percentage: (allocated / system) * 100
-    local percentage=$((alloc_bytes * 100 / sys_bytes))
+    local percentage
+    percentage=$((alloc_bytes * 100 / sys_bytes))
     echo $percentage
 }
 
 start_nomad_gc() {
     echo "Starting Nomad garbage collection background process (triggered when memory >= 20%)..."
     (
+        # Ensure NOMAD_TOKEN and NOMAD_ADDR are available in the background process
+        export NOMAD_TOKEN="${NOMAD_TOKEN}"
+        export NOMAD_ADDR="${NOMAD_ADDR:-http://nomad-server-test.test.nextgenwaterprediction.com:4646}"
+        
         while true; do
             local memory_usage=$(get_nomad_memory_usage_percentage)
             if [[ $? -eq 0 && $memory_usage -ge 20 ]]; then
