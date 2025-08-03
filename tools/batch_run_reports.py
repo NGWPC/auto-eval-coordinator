@@ -30,12 +30,16 @@ def main():
     parser.add_argument("--html", action="store_true", help="Generate HTML dashboard in addition to CSV reports")
     parser.add_argument("--aoi_list", help="Path to AOI list file (same format as used by submit_stac_batch.py) for missing pipeline detection")
     parser.add_argument("--collection", help="Optional: filter results to only a specific collection within the batch")
+    parser.add_argument("--scrape_bucket", action="store_true", help="Only analyze S3 bucket contents, skip CloudWatch logs analysis")
 
     args = parser.parse_args()
 
     # Validate arguments
     if args.s3_output_root and not args.s3_output_root.startswith("s3://"):
         parser.error("s3_output_root must start with 's3://'")
+    
+    if args.scrape_bucket and not args.s3_output_root:
+        parser.error("--scrape_bucket requires --s3_output_root to be provided")
 
     # Create config
     config = DebugConfig(
@@ -48,6 +52,7 @@ def main():
         generate_html=args.html,
         aoi_list_path=args.aoi_list,
         collection=args.collection,
+        scrape_bucket=args.scrape_bucket,
     )
 
     try:
@@ -77,7 +82,17 @@ def main():
         print(f"\nReports saved to: {config.output_dir}")
 
         if config.generate_html:
-            print(f"📊 View the interactive dashboard: {config.output_dir}/batch_analysis_dashboard.html")
+            # Find the HTML dashboard file in the generated reports
+            html_file = None
+            for report in results["reports_generated"]:
+                if report.endswith('.html'):
+                    html_file = report
+                    break
+            
+            if html_file:
+                print(f"📊 View the interactive dashboard: {html_file}")
+            else:
+                print(f"📊 HTML dashboard generated in: {config.output_dir}")
 
     except Exception as e:
         logger.error(f"Analysis failed: {e}")

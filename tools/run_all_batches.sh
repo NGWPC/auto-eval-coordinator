@@ -137,7 +137,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
                 echo "Warning: batch_run_reports.py failed for $collection"
             else
                 echo "Reports generated for $collection at: $collection_reports_dir"
-                echo "View dashboard: $collection_reports_dir/batch_analysis_dashboard.html"
+                echo "View HTML dashboard in: $collection_reports_dir/"
             fi
         fi
         

@@ -31,6 +31,7 @@ class DebugConfig:
     generate_html: bool = False
     aoi_list_path: Optional[str] = None
     collection: Optional[str] = None
+    scrape_bucket: bool = False
 
 
 @dataclass

@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>S3 Metrics Dashboard - {{ batch_name }}</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f8f9fa;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+      color: white;
+      padding: 2rem;
+      border-radius: 12px;
+      margin-bottom: 2rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      font-size: 2.2rem;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    .header-meta {
+      opacity: 0.9;
+      font-size: 0.95rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2rem;
+    }
+
+    /* S3 Summary Card */
+    .s3-summary-card {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      text-align: center;
+    }
+
+    .s3-health-score {
+      font-size: 4rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+      color: #27ae60;
+    }
+
+    .s3-health-score.missing {
+      color: #e74c3c;
+    }
+
+    .s3-health-score.issues {
+      color: #f39c12;
+    }
+
+    .s3-health-label {
+      font-size: 1.2rem;
+      color: #666;
+      margin-bottom: 1rem;
+    }
+
+    .s3-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    .metric {
+      text-align: center;
+    }
+
+    .metric-value {
+      font-size: 1.8rem;
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
+
+    .metric-value.success {
+      color: #27ae60;
+    }
+
+    .metric-value.missing {
+      color: #e74c3c;
+    }
+
+    .metric-value.empty {
+      color: #f39c12;
+    }
+
+    .metric-label {
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    /* Navigation Tabs */
+    .main-nav {
+      display: flex;
+      background: white;
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      margin-bottom: 0;
+      overflow: hidden;
+    }
+
+    .nav-tab {
+      flex: 1;
+      padding: 1.2rem;
+      text-align: center;
+      background: #f8f9fa;
+      border: none;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      border-bottom: 3px solid transparent;
+    }
+
+    .nav-tab:hover {
+      background: #e9ecef;
+    }
+
+    .nav-tab.active {
+      background: white;
+      border-bottom-color: #27ae60;
+      color: #27ae60;
+    }
+
+    /* Content Area */
+    .content-area {
+      background: white;
+      border-radius: 0 0 12px 12px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      min-height: 500px;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 2rem;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Status Cards */
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .status-card {
+      background: white;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 1.5rem;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .status-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-card.success {
+      border-left: 4px solid #27ae60;
+    }
+
+    .status-card.missing {
+      border-left: 4px solid #e74c3c;
+    }
+
+    .status-card.empty {
+      border-left: 4px solid #f39c12;
+    }
+
+    .status-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-count {
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+
+    /* File Lists */
+    .file-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      background: #f8f9fa;
+    }
+
+    .file-item {
+      padding: 1rem;
+      border-bottom: 1px solid #e9ecef;
+      transition: background-color 0.2s ease;
+      background: white;
+      margin-bottom: 0.5rem;
+      border-radius: 4px;
+    }
+
+    .file-item:hover {
+      background-color: #f8f9fa;
+    }
+
+    .file-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .file-path {
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.85rem;
+      color: #2c3e50;
+      margin-bottom: 0.25rem;
+      word-break: break-all;
+    }
+
+    .file-path a {
+      color: #27ae60;
+      text-decoration: none;
+    }
+
+    .file-path a:hover {
+      text-decoration: underline;
+    }
+
+    .file-info {
+      color: #666;
+      font-size: 0.8rem;
+    }
+
+    /* Quick Filters */
+    .filters {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .filter-input {
+      padding: 0.5rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    /* Info Cards */
+    .info-card {
+      background: #e8f5e8;
+      border: 1px solid #27ae60;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-card h3 {
+      color: #27ae60;
+      margin-bottom: 0.5rem;
+    }
+
+    .warning-card {
+      background: #fef9e7;
+      border: 1px solid #f39c12;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .warning-card h3 {
+      color: #f39c12;
+      margin-bottom: 0.5rem;
+    }
+
+    .error-card {
+      background: #fdf2f2;
+      border: 1px solid #e74c3c;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .error-card h3 {
+      color: #e74c3c;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header {
+        padding: 1.5rem;
+      }
+
+      .header h1 {
+        font-size: 1.8rem;
+      }
+
+      .main-nav {
+        flex-direction: column;
+      }
+
+      .nav-tab {
+        padding: 1rem;
+      }
+
+      .s3-metrics {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .filters {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    /* Utilities */
+    .hidden {
+      display: none !important;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    .mt-1 {
+      margin-top: 0.5rem;
+    }
+
+    .mt-2 {
+      margin-top: 1rem;
+    }
+
+    .mb-1 {
+      margin-bottom: 0.5rem;
+    }
+
+    .mb-2 {
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>S3 Metrics Dashboard</h1>
+      <div class="header-meta">
+        <span><strong>Batch:</strong> {{ batch_name }}</span>
+        {% if collection %}
+        <span><strong>Collection:</strong> {{ collection }}</span>
+        {% endif %}
+        <span><strong>Analysis Time:</strong> {{ analysis_timestamp }}</span>
+      </div>
+    </div>
+
+    <!-- S3 Summary Card -->
+    <div class="s3-summary-card">
+      {% set total_issues = missing_metrics_count + empty_metrics_count + missing_agg_metrics_count %}
+      <div class="s3-health-score {{ 'success' if total_issues == 0 else 'issues' if total_issues < 10 else 'missing' }}">
+        {{ total_issues }}
+      </div>
+      <div class="s3-health-label">Total S3 Issues Found</div>
+
+      <div class="s3-metrics">
+        <div class="metric">
+          <div class="metric-value missing">{{ missing_metrics_count }}</div>
+          <div class="metric-label">Missing Metrics</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value empty">{{ empty_metrics_count }}</div>
+          <div class="metric-label">Empty Metrics</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value missing">{{ missing_agg_metrics_count }}</div>
+          <div class="metric-label">Missing Agg Metrics</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Navigation -->
+    <div class="main-nav">
+      <button class="nav-tab active" onclick="showTab('overview')">Overview</button>
+      <button class="nav-tab" onclick="showTab('missing')">Missing Metrics</button>
+      <button class="nav-tab" onclick="showTab('empty')">Empty Metrics</button>
+      <button class="nav-tab" onclick="showTab('agg')">Missing Agg Metrics</button>
+    </div>
+
+    <div class="content-area">
+      <!-- Overview Tab -->
+      <div id="overview" class="tab-content active">
+        <h2>S3 Bucket Analysis Overview</h2>
+
+        {% if total_issues == 0 %}
+        <div class="info-card">
+          <h3>✅ All Metrics Files Present</h3>
+          <p>Great! All expected metrics files and aggregated metrics files are present in the S3 bucket. No missing or empty files detected.</p>
+        </div>
+        {% elif total_issues < 10 %}
+        <div class="warning-card">
+          <h3>⚠️ Minor Issues Detected</h3>
+          <p>Found {{ total_issues }} file(s) with issues. This is relatively minor but should be investigated to ensure data completeness.</p>
+        </div>
+        {% else %}
+        <div class="error-card">
+          <h3>🚨 Significant Issues Detected</h3>
+          <p>Found {{ total_issues }} file(s) with issues. This indicates potential problems with the pipeline execution or data processing that require immediate attention.</p>
+        </div>
+        {% endif %}
+
+        <div class="status-grid">
+          <div class="status-card {{ 'success' if missing_metrics_count == 0 else 'missing' }}">
+            <div class="status-title">
+              Missing Metrics Files
+              <span class="status-count">{{ missing_metrics_count }}</span>
+            </div>
+            <div class="mt-1">Directories that should have metrics.csv but don't</div>
+          </div>
+
+          <div class="status-card {{ 'success' if empty_metrics_count == 0 else 'empty' }}">
+            <div class="status-title">
+              Empty/Invalid Metrics
+              <span class="status-count">{{ empty_metrics_count }}</span>
+            </div>
+            <div class="mt-1">Metrics files that exist but are empty or invalid</div>
+          </div>
+
+          <div class="status-card {{ 'success' if missing_agg_metrics_count == 0 else 'missing' }}">
+            <div class="status-title">
+              Missing Agg Metrics
+              <span class="status-count">{{ missing_agg_metrics_count }}</span>
+            </div>
+            <div class="mt-1">Directories missing agg_metrics.csv files</div>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <h3>What This Analysis Covers</h3>
+          <p><strong>Metrics Files:</strong> Individual CSV files containing processing metrics for each AOI/tile</p>
+          <p><strong>Aggregated Metrics:</strong> Summary files that aggregate metrics across multiple processing units</p>
+          <p><strong>Data Integrity:</strong> Verification that files exist and contain valid data</p>
+        </div>
+      </div>
+
+      <!-- Missing Metrics Tab -->
+      <div id="missing" class="tab-content">
+        <h2>Missing Metrics Files</h2>
+        <p class="mb-2">Directories that should contain metrics.csv files but don't.</p>
+
+        {% if missing_metrics_count == 0 %}
+        <div class="info-card">
+          <h3>✅ No Missing Metrics Files</h3>
+          <p>All expected metrics.csv files are present in the S3 bucket.</p>
+        </div>
+        {% else %}
+        <div class="filters">
+          <div class="filter-group">
+            <label>Search Paths:</label>
+            <input type="text" class="filter-input" id="missingSearch" placeholder="Filter by path..."
+              onkeyup="filterFiles('missing')">
+          </div>
+        </div>
+
+        <div class="file-list" id="missingFilesList">
+          {% for item in missing_metrics %}
+          <div class="file-item" data-path="{{ item.directory_path }}">
+            <div class="file-path">
+              <a href="{{ item.s3_url }}" target="_blank">{{ item.directory_path }}</a>
+            </div>
+            <div class="file-info">Expected: metrics.csv | AOI: {{ item.aoi_name if item.aoi_name else 'Unknown' }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Empty Metrics Tab -->
+      <div id="empty" class="tab-content">
+        <h2>Empty/Invalid Metrics Files</h2>
+        <p class="mb-2">Metrics files that exist but are empty or contain invalid data.</p>
+
+        {% if empty_metrics_count == 0 %}
+        <div class="info-card">
+          <h3>✅ No Empty Metrics Files</h3>
+          <p>All metrics.csv files contain valid data.</p>
+        </div>
+        {% else %}
+        <div class="filters">
+          <div class="filter-group">
+            <label>Search Paths:</label>
+            <input type="text" class="filter-input" id="emptySearch" placeholder="Filter by path..."
+              onkeyup="filterFiles('empty')">
+          </div>
+        </div>
+
+        <div class="file-list" id="emptyFilesList">
+          {% for item in empty_metrics %}
+          <div class="file-item" data-path="{{ item.file_path }}">
+            <div class="file-path">
+              <a href="{{ item.s3_url }}" target="_blank">{{ item.file_path }}</a>
+            </div>
+            <div class="file-info">
+              Size: {{ item.file_size if item.file_size else 'Unknown' }} bytes | 
+              Issue: {{ item.issue_type if item.issue_type else 'Empty or invalid content' }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Missing Agg Metrics Tab -->
+      <div id="agg" class="tab-content">
+        <h2>Missing Aggregated Metrics Files</h2>
+        <p class="mb-2">Directories that should contain agg_metrics.csv files but don't.</p>
+
+        {% if missing_agg_metrics_count == 0 %}
+        <div class="info-card">
+          <h3>✅ No Missing Agg Metrics Files</h3>
+          <p>All expected agg_metrics.csv files are present in the S3 bucket.</p>
+        </div>
+        {% else %}
+        <div class="filters">
+          <div class="filter-group">
+            <label>Search Paths:</label>
+            <input type="text" class="filter-input" id="aggSearch" placeholder="Filter by path..."
+              onkeyup="filterFiles('agg')">
+          </div>
+        </div>
+
+        <div class="file-list" id="aggFilesList">
+          {% for item in missing_agg_metrics %}
+          <div class="file-item" data-path="{{ item.directory_path }}">
+            <div class="file-path">
+              <a href="{{ item.s3_url }}" target="_blank">{{ item.directory_path }}</a>
+            </div>
+            <div class="file-info">Expected: agg_metrics.csv | AOI: {{ item.aoi_name if item.aoi_name else 'Unknown' }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(tabName) {
+      // Hide all tab contents
+      const contents = document.querySelectorAll('.tab-content');
+      contents.forEach(content => content.classList.remove('active'));
+
+      // Remove active class from all tabs
+      const tabs = document.querySelectorAll('.nav-tab');
+      tabs.forEach(tab => tab.classList.remove('active'));
+
+      // Show selected tab content
+      document.getElementById(tabName).classList.add('active');
+
+      // Add active class to clicked tab
+      event.target.classList.add('active');
+    }
+
+    function filterFiles(tabType) {
+      const searchId = tabType + 'Search';
+      const listId = tabType + 'FilesList';
+      
+      const searchTerm = document.getElementById(searchId).value.toLowerCase();
+      const fileItems = document.querySelectorAll(`#${listId} .file-item`);
+
+      fileItems.forEach(item => {
+        const path = item.getAttribute('data-path').toLowerCase();
+        const searchMatch = searchTerm === '' || path.includes(searchTerm);
+
+        if (searchMatch) {
+          item.style.display = 'block';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', function () {
+      // Set initial active tab
+      showTab('overview');
+    });
+  </script>
+</body>
+
+</html>
