@@ -36,28 +36,6 @@ COMPLETED=""
 # Generate timestamp in format: YYYY-MM-DD-HH (e.g., 2025-08-01-14 for 2PM on Aug 1, 2025)
 TIMESTAMP=$(date +"%Y-%m-%d-%H")
 
-echo "=== Autoeval Batch Processing Script ==="
-echo "Processing ${#RESOLUTIONS[@]} resolutions x ${#COLLECTIONS[@]} collections"
-echo "Timestamp: $TIMESTAMP"
-echo ""
-
-# Start background Nomad garbage collection
-start_nomad_gc
-
-confirm_command() {
-    local command="$1"
-    echo "About to execute:"
-    echo "$command"
-    echo ""
-    read -p "Proceed? (y/n): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Skipping command..."
-        return 1
-    fi
-    return 0
-}
-
 start_nomad_gc() {
     echo "Starting Nomad garbage collection background process (every 30 minutes)..."
     (
@@ -81,6 +59,28 @@ start_nomad_gc() {
     # Set trap to cleanup on script exit
     trap cleanup_nomad_gc EXIT
 }
+
+confirm_command() {
+    local command="$1"
+    echo "About to execute:"
+    echo "$command"
+    echo ""
+    read -p "Proceed? (y/n): " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Skipping command..."
+        return 1
+    fi
+    return 0
+}
+
+echo "=== Autoeval Batch Processing Script ==="
+echo "Processing ${#RESOLUTIONS[@]} resolutions x ${#COLLECTIONS[@]} collections"
+echo "Timestamp: $TIMESTAMP"
+echo ""
+
+# Start background Nomad garbage collection
+start_nomad_gc
 
 for resolution in "${RESOLUTIONS[@]}"; do
     echo "=== Processing Resolution: ${resolution}m ==="
