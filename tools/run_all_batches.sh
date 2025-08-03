@@ -36,13 +36,36 @@ COMPLETED=""
 # Generate timestamp in format: YYYY-MM-DD-HH (e.g., 2025-08-01-14 for 2PM on Aug 1, 2025)
 TIMESTAMP=$(date +"%Y-%m-%d-%H")
 
+get_nomad_memory_usage_percentage() {
+    # Get memory usage from Nomad server using operator metrics
+    local alloc_bytes sys_bytes
+    
+    # Get allocated and system memory from Nomad metrics using jq
+    alloc_bytes=$(nomad operator metrics -json 2>/dev/null | jq -r '.Gauges[] | select(.Name == "nomad.runtime.alloc_bytes") | .Value')
+    sys_bytes=$(nomad operator metrics -json 2>/dev/null | jq -r '.Gauges[] | select(.Name == "nomad.runtime.sys_bytes") | .Value')
+    
+    if [[ -z "$alloc_bytes" || -z "$sys_bytes" || "$alloc_bytes" == "null" || "$sys_bytes" == "null" ]]; then
+        echo "Error: Could not parse memory metrics" >&2
+        return 1
+    fi
+    
+    # Calculate percentage: (allocated / system) * 100
+    local percentage=$((alloc_bytes * 100 / sys_bytes))
+    echo $percentage
+}
+
 start_nomad_gc() {
-    echo "Starting Nomad garbage collection background process (every 30 minutes)..."
+    echo "Starting Nomad garbage collection background process (triggered when memory >= 30%)..."
     (
         while true; do
-            echo "$(date): Running nomad system gc"
-            nomad system gc
-            sleep 1800  # 30 minutes = 1800 seconds
+            local memory_usage=$(get_nomad_memory_usage_percentage)
+            if [[ $? -eq 0 && $memory_usage -ge 30 ]]; then
+                echo "$(date): Nomad memory usage at ${memory_usage}% - Running nomad system gc"
+                nomad system gc
+            elif [[ $? -ne 0 ]]; then
+                echo "$(date): Warning - Could not check Nomad memory usage"
+            fi
+            sleep 60  # Check every minute
         done
     ) &
     NOMAD_GC_PID=$!
