@@ -2,8 +2,28 @@
  
 ## A script to run batches in succession for all the evals to be run. 
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUTS_DIR="$SCRIPT_DIR/../inputs"
+# Find the repository root by looking for .git directory
+find_repo_root() {
+    local dir="$(pwd)"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "Error: Could not find repository root (no .git directory found)" >&2
+    exit 1
+}
+
+REPO_ROOT="$(find_repo_root)"
+INPUTS_DIR="$REPO_ROOT/inputs"
+
+echo "Repository root: $REPO_ROOT"
+echo ""
+
+# Change to repo root to ensure all relative paths work correctly
+cd "$REPO_ROOT"
 
 declare -a RESOLUTIONS=("10" "5" "3")
 
@@ -40,7 +60,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
     
     # Define resolution-specific parameters
     batch_name="fim100_huc12_${resolution}m_${TIMESTAMP}"
-    output_root="s3://fimc-data/autoeval/batches/fim100_huc12_${resolution}m_non_calibrated/"
+    output_root="s3://fimc-data/autoeval/batches/fim100_huc12_${resolution}_non_calibrated/"
     hand_index_path="s3://fimc-data/autoeval/hand_output_indices/fim100_huc12_${resolution}m_index/"
     
     # loop over collections
@@ -63,7 +83,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         fi
         
         # Build the submit_stac_batch.py command
-        submit_cmd="python ./tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 5 --max_pipelines 150" # Scaling tests showed you shouldn't go above ~200 pipelines with current Nomad deploy.
+        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 5 --max_pipelines 150" # Scaling tests showed you shouldn't go above ~200 pipelines with current Nomad deploy.
         
         # Get user confirmation and execute
         if confirm_command "$submit_cmd"; then
@@ -81,10 +101,9 @@ for resolution in "${RESOLUTIONS[@]}"; do
         
         # Refresh AWS credentials before generating report
         echo "--- Refreshing AWS Credentials for $collection report ---"
-        echo "Configuring AWS SSO..."
-        aws configure sso
+        aws sso login --profile AWSPowerUserAccess-591210920133
         if [[ $? -ne 0 ]]; then
-            echo "Error: AWS SSO configuration failed"
+            echo "Error: AWS SSO login failed"
             read -p "Continue anyway? (y/n): " -n 1 -r
             echo ""
             [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
@@ -102,8 +121,8 @@ for resolution in "${RESOLUTIONS[@]}"; do
         
         # Generate report for this collection before purging
         echo "--- Generating Report for $collection at ${resolution}m ---"
-        collection_reports_dir="../reports/${batch_name}_${collection}"
-        collection_report_cmd="python tools/batch_run_reports.py --batch_name $batch_name --output_dir $collection_reports_dir --pipeline_log_group /aws/ec2/nomad-client-linux-test --job_log_group /aws/ec2/nomad-client-linux-test --s3_output_root $output_root --aoi_list $item_list_file --html"
+        collection_reports_dir="$REPO_ROOT/reports/${batch_name}_${collection}"
+        collection_report_cmd="python tools/batch_run_reports.py --batch_name $batch_name --output_dir $collection_reports_dir --pipeline_log_group /aws/ec2/nomad-client-linux-test --job_log_group /aws/ec2/nomad-client-linux-test --s3_output_root $output_root --aoi_list $item_list_file --collection $collection --html"
         
         if confirm_command "$collection_report_cmd"; then
             echo "Executing batch_run_reports.py for $collection..."
@@ -133,7 +152,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
     
     # After processing all collections for this resolution, run make_master_metrics
     echo "--- Creating Master Metrics for ${resolution}m ---"
-    master_metrics_cmd="python ./tools/make_master_metrics.py $output_root --hand-version \"fim100_huc12\" --resolution \"$resolution\""
+    master_metrics_cmd="python tools/make_master_metrics.py $output_root --hand-version \"fim100_huc12\" --resolution \"$resolution\""
     
     if confirm_command "$master_metrics_cmd"; then
         echo "Executing make_master_metrics.py..."
