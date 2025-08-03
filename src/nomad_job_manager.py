@@ -417,10 +417,6 @@ class NomadJobManager:
                     except Exception as e:
                         logger.error(f"Error polling job {job_id}: {e}")
 
-                # Periodically check for orphaned jobs (every 5 polling cycles)
-                if len(jobs_to_check) > 0 and time.time() % (self.polling_interval * 5) < self.polling_interval:
-                    await self._check_for_orphaned_jobs()
-
             except Exception as e:
                 logger.error(f"Error in polling fallback: {e}")
                 await asyncio.sleep(5)
@@ -453,7 +449,15 @@ class NomadJobManager:
             old_status = tracker.status
             new_status = NOMAD_STATUS_MAP.get(client_status, JobStatus.UNKNOWN)
 
-            if new_status != JobStatus.UNKNOWN and (new_status != old_status or force_check):
+            # Handle unknown status when polling escalation timeout exceeded
+            if new_status == JobStatus.UNKNOWN and force_check:
+                logger.warning(f"Job {tracker.job_id} has unknown status after escalation timeout - marking as lost")
+                tracker.status = JobStatus.LOST
+                tracker.timestamp = datetime.now(timezone.utc)
+                await self._update_job_status(tracker)
+                tracker.completion_event.set()
+                logger.info(f"Job {tracker.job_id} marked as lost due to unknown status after timeout")
+            elif new_status != JobStatus.UNKNOWN and (new_status != old_status or force_check):
                 logger.info(
                     f"Job {tracker.job_id} status change via polling: JobStatus.{old_status.name} -> JobStatus.{new_status.name}"
                 )
@@ -507,18 +511,27 @@ class NomadJobManager:
                     tracker.completion_event.set()
                     logger.info(f"Job {tracker.job_id} completed via polling with status JobStatus.{new_status.name}")
 
-        except nomad.api.exceptions.URLNotFoundNomadException:
-            logger.warning(f"Job {tracker.job_id} not found in Nomad - may have been garbage collected")
-            # Don't mark as failed immediately - could be a temporary issue
+        except (
+            nomad.api.exceptions.URLNotFoundNomadException,
+            nomad.api.exceptions.URLNotAuthorizedNomadException,
+            nomad.api.exceptions.TimeoutNomadException,
+        ) as e:
+            logger.error(f"Job {tracker.job_id} terminal error: {e}")
+
             if force_check:
-                logger.error(f"Job {tracker.job_id} confirmed missing from Nomad")
-                # Only mark as lost if this was a forced check (e.g., from timeout)
+                logger.error(f"Job {tracker.job_id} terminal error after escalation - marking as lost")
                 tracker.status = JobStatus.LOST
                 tracker.completion_event.set()
                 await self._update_job_status(tracker)
+        except (
+            nomad.api.exceptions.BadRequestNomadException,
+            nomad.api.exceptions.BaseNomadException,
+        ) as e:
+            logger.warning(f"Transient error polling job {tracker.job_id}: {e}")
+            # These are potentially transient errors - continue polling even on force_check
         except Exception as e:
-            logger.error(f"Failed to poll status for job {tracker.job_id}: {e}")
-            # Don't mark as failed here - let timeout handling deal with it
+            logger.error(f"Unexpected error polling job {tracker.job_id}: {e}")
+            # Unknown exceptions are treated as potentially transient
 
     async def _reconcile_job_status(self, tracker: JobTracker):
         """Check if a job has already completed before we started tracking it."""
@@ -542,43 +555,6 @@ class NomadJobManager:
         except Exception as e:
             logger.warning(f"Failed to reconcile status for job {tracker.job_id}: {e}")
             # Continue anyway - polling fallback will catch it
-
-    async def _check_for_orphaned_jobs(self):
-        """Check for jobs that may have been missed by event tracking."""
-        try:
-            logger.debug("Checking for orphaned jobs")
-
-            # Get list of recent jobs from Nomad
-            jobs = await self._nomad_call(self.client.jobs.get_jobs)
-
-            # Look for dispatched jobs that we're not tracking
-            for job in jobs:
-                job_id = job.get("ID", "")
-                job_type = job.get("Type", "")
-                job_status = job.get("Status", "").lower()
-
-                # Only check parameterized jobs (dispatched jobs)
-                if job_type != "batch" or not job_id:
-                    continue
-
-                # Skip if we're already tracking this job
-                if job_id in self._active_jobs:
-                    continue
-
-                # Skip very old jobs (older than 1 hour)
-                submit_time = job.get("SubmitTime", 0)
-                if submit_time and (time.time() * 1e9 - submit_time) > 3600 * 1e9:
-                    continue
-
-                # Check if this job looks like it might be ours
-                # (This is a heuristic - you might want to add metadata checks)
-                if job_status in ["running", "complete", "failed"] and "hand-inundator" in job_id:
-                    logger.warning(f"Found potentially orphaned job: {job_id} (status: {job_status})")
-                    # Note: We don't auto-track these as it could cause confusion
-                    # This is just for monitoring/alerting purposes
-
-        except Exception as e:
-            logger.error(f"Error checking for orphaned jobs: {e}")
 
     async def _handle_event(self, event: Dict[str, Any]):
         """Handle a single Nomad event."""
