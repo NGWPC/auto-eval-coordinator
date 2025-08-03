@@ -542,6 +542,22 @@ class CloudWatchAnalyzer:
                 if stream:
                     successful_streams.add(stream)
             
+            # Check for job failures in these streams to distinguish failure types
+            job_failure_streams = set()
+            if chunk:
+                streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
+                job_failure_query = f"""
+                fields @logStream
+                | filter ({streams_filter}) and @message like /JobStatus.FAILED/
+                | stats count() by @logStream
+                """
+                
+                job_failure_results = self.run_query(self.config.pipeline_log_group, job_failure_query)
+                for result in job_failure_results:
+                    stream = self._get_field_value(result, "@logStream")
+                    if stream:
+                        job_failure_streams.add(stream)
+            
             # Find streams in this chunk that don't have success messages
             for stream in chunk:
                 if stream not in successful_streams:
@@ -561,6 +577,12 @@ class CloudWatchAnalyzer:
                     if timestamp_results:
                         timestamp = self._get_field_value(timestamp_results[0], "@timestamp")
                     
+                    # Determine failure reason based on whether there were job failures
+                    if stream in job_failure_streams:
+                        failure_reason = "Pipeline failed with job failures but no SUCCESS message"
+                    else:
+                        failure_reason = "Pipeline failed without any job failures (silent failure)"
+                    
                     failed_pipelines.append(
                         FailedPipelineInfo(
                             pipeline_log_stream=stream,
@@ -568,7 +590,7 @@ class CloudWatchAnalyzer:
                             batch_name=self.config.batch_name,
                             collection=self.config.collection,
                             timestamp=timestamp,
-                            failure_reason="No 'INFO Pipeline SUCCESS' message found"
+                            failure_reason=failure_reason
                         )
                     )
 

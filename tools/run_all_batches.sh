@@ -41,6 +41,9 @@ echo "Processing ${#RESOLUTIONS[@]} resolutions x ${#COLLECTIONS[@]} collections
 echo "Timestamp: $TIMESTAMP"
 echo ""
 
+# Start background Nomad garbage collection
+start_nomad_gc
+
 confirm_command() {
     local command="$1"
     echo "About to execute:"
@@ -53,6 +56,30 @@ confirm_command() {
         return 1
     fi
     return 0
+}
+
+start_nomad_gc() {
+    echo "Starting Nomad garbage collection background process (every 30 minutes)..."
+    (
+        while true; do
+            echo "$(date): Running nomad system gc"
+            nomad system gc
+            sleep 1800  # 30 minutes = 1800 seconds
+        done
+    ) &
+    NOMAD_GC_PID=$!
+    echo "Nomad GC background process started with PID: $NOMAD_GC_PID"
+    
+    # Function to cleanup background process on script exit
+    cleanup_nomad_gc() {
+        if [[ -n "$NOMAD_GC_PID" ]]; then
+            echo "Stopping Nomad GC background process (PID: $NOMAD_GC_PID)..."
+            kill $NOMAD_GC_PID 2>/dev/null
+        fi
+    }
+    
+    # Set trap to cleanup on script exit
+    trap cleanup_nomad_gc EXIT
 }
 
 for resolution in "${RESOLUTIONS[@]}"; do
@@ -69,7 +96,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         
         # Check if this collection:resolution combination has been completed
         if [[ " $COMPLETED " =~ " ${collection}:${resolution} " ]]; then
-            echo "✓ Already completed. Skipping ${collection} at ${resolution}m..."
+            echo "Already completed. Skipping ${collection} at ${resolution}m..."
             continue
         fi
         

@@ -238,19 +238,31 @@ class ReportGenerator:
                 "batch_name", 
                 "collection", 
                 "timestamp", 
-                "failure_reason"
+                "failure_reason",
+                "failure_type",
+                "investigation_notes"
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
             for pipeline in failed_pipelines:
+                # Categorize failure type and provide specific investigation notes
+                if "job failures" in pipeline.failure_reason:
+                    failure_type = "Pipeline Cleanup/Finalization Failure"
+                    investigation_notes = "Pipeline had job failures but failed to complete properly. Check pipeline logic after job failures - may be missing error handling, cleanup steps, or proper failure reporting."
+                else:
+                    failure_type = "Infrastructure/Silent Failure"
+                    investigation_notes = "Pipeline submitted but never reached SUCCESS state with no job failures detected. Check for infrastructure issues, resource constraints, configuration problems, or early pipeline termination."
+                
                 writer.writerow({
                     "pipeline_log_stream": pipeline.pipeline_log_stream,
                     "aoi_name": pipeline.aoi_name,
                     "batch_name": pipeline.batch_name,
                     "collection": pipeline.collection or "",
                     "timestamp": pipeline.timestamp or "",
-                    "failure_reason": pipeline.failure_reason
+                    "failure_reason": pipeline.failure_reason,
+                    "failure_type": failure_type,
+                    "investigation_notes": investigation_notes
                 })
 
         logger.info(f"Generated failed pipelines report: {output_file}")

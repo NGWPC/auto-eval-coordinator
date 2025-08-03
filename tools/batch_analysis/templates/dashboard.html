@@ -290,6 +290,12 @@
                 <div class="stat-label">Unique Error Patterns</div>
             </div>
             {% endif %}
+            {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
+            <div class="stat-card">
+                <div class="stat-value error">{{ failed_pipelines_count }}</div>
+                <div class="stat-label">Failed Pipelines (No Job Failures)</div>
+            </div>
+            {% endif %}
             {% if missing_aois_count is defined %}
             <div class="stat-card">
                 <div class="stat-value error">{{ missing_aois_count }}</div>
@@ -323,6 +329,9 @@
             <button class="tab" onclick="showTab('unique-exceptions')">⚡ Unique Exceptions</button>
             {% endif %}
             <button class="tab" onclick="showTab('exceptions')">📋 All Exceptions</button>
+            {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
+            <button class="tab" onclick="showTab('failed-pipelines')">🚫 Failed Pipelines (No Job Failures)</button>
+            {% endif %}
             {% if missing_aois_count is defined %}
             <button class="tab" onclick="showTab('missing-aois')">Missing AOIs</button>
             {% endif %}
@@ -511,6 +520,57 @@
             {% endif %}
         </div>
 
+        {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
+        <div id="failed-pipelines" class="tab-content">
+            <h2 class="section-title">🚫 Failed Pipelines (No Job Failures)</h2>
+            <div class="export-links">
+                <a href="failed_pipelines.csv" class="export-link">📥 Download CSV</a>
+            </div>
+            <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; margin-bottom: 1rem; border-left: 4px solid #f39c12;">
+                <strong>⚠️ Pipeline Failures (No SUCCESS):</strong> These pipelines were submitted but never reached a SUCCESS state. 
+                <strong>{{ failed_pipelines_count }} pipelines</strong> failed, which may be due to:
+                <ul style="margin: 0.5rem 0 0 1.5rem;">
+                    <li><strong>Silent Infrastructure Failures:</strong> No job failures detected - check infrastructure, resources, or configuration</li>
+                    <li><strong>Cleanup/Finalization Failures:</strong> Jobs failed but pipeline didn't complete properly - check error handling logic</li>
+                </ul>
+            </div>
+            <input type="text" class="search-box" placeholder="Search failed pipelines..." onkeyup="filterTable('failed-pipelines-table', this.value)">
+            <div class="filter-info">
+                Showing <span id="failed-pipelines-count">{{ failed_pipelines|length }}</span> failed pipelines
+            </div>
+            <div class="table-container">
+                <table id="failed-pipelines-table">
+                    <thead>
+                        <tr>
+                            <th>AOI Name</th>
+                            <th>Pipeline Log Stream</th>
+                            <th>Batch Name</th>
+                            <th>Collection</th>
+                            <th>Timestamp</th>
+                            <th>Failure Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for pipeline in failed_pipelines %}
+                        <tr>
+                            <td><strong>{{ pipeline.aoi_name }}</strong></td>
+                            <td><span class="job-stream">{{ pipeline.pipeline_log_stream }}</span></td>
+                            <td>{{ pipeline.batch_name }}</td>
+                            <td>{{ pipeline.collection or "N/A" }}</td>
+                            <td><span class="timestamp">{{ pipeline.timestamp or 'N/A' }}</span></td>
+                            <td>
+                                <span style="background: #e74c3c; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8rem;">
+                                    {{ pipeline.failure_reason }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
         {% if missing_aois_count is defined %}
         <div id="missing-aois" class="tab-content">
             <h2 class="section-title">Missing AOIs Analysis</h2>
@@ -658,6 +718,9 @@
                 <p><strong>Unhandled Exceptions:</strong> {{ unhandled_exceptions_count }}</p>
                 {% if unique_unhandled_exceptions|length > 0 %}
                 <p><strong>⚡ Unique Exception Patterns:</strong> {{ unique_unhandled_exceptions|length }}</p>
+                {% endif %}
+                {% if failed_pipelines_count is defined and failed_pipelines_count > 0 %}
+                <p><strong>🚫 Failed Pipelines (No Job Failures):</strong> {{ failed_pipelines_count }} <em>(infrastructure/silent failures)</em></p>
                 {% endif %}
                 {% if missing_aois_count is defined %}
                 <p><strong>Missing AOIs (no logs):</strong> {{ missing_aois_count }}</p>
