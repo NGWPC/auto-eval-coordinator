@@ -81,7 +81,7 @@ def should_use_convex_hull(collection_id: Optional[str]) -> bool:
     Returns:
         True if convex hull should be applied
     """
-    fim_collections = {"nws-fim-collection", "usgs-fim-collection"}
+    fim_collections = {"ble-collection", "nws-fim-collection", "usgs-fim-collection"}
     return collection_id in fim_collections if collection_id else False
 
 

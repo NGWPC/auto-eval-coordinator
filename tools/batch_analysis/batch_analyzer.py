@@ -54,6 +54,11 @@ class BatchRunAnalyzer:
         results["unique_errors"] = unique_errors
         results["unique_unhandled_exceptions"] = unhandled_exceptions_unique
 
+        # Failed pipeline analysis
+        logger.info("=== Failed Pipeline Analysis ===")
+        failed_pipelines = self.cloudwatch.find_failed_pipelines()
+        results["failed_pipelines_count"] = len(failed_pipelines)
+
         # AOI list comparison (if provided)
         missing_aois = []
         if self.config.aoi_list_path:
@@ -108,6 +113,11 @@ class BatchRunAnalyzer:
             report_file = self.report_generator.generate_missing_aois_report(missing_aois, self.config.batch_name, self.config.collection)
             results["reports_generated"].append(report_file)
 
+        # Generate failed pipelines report
+        if failed_pipelines:
+            report_file = self.report_generator.generate_failed_pipelines_report(failed_pipelines)
+            results["reports_generated"].append(report_file)
+
         # S3 metrics analysis
         missing_metrics = []
         empty_metrics = []
@@ -146,6 +156,7 @@ class BatchRunAnalyzer:
                 missing_aois if missing_aois else None,
                 unique_errors,
                 unhandled_exceptions_unique,
+                failed_pipelines,
             )
             results["reports_generated"].append(html_file)
 

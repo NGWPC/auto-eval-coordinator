@@ -44,6 +44,18 @@ class UniqueErrorInfo:
 
 
 @dataclass
+class FailedPipelineInfo:
+    """Information about a pipeline that failed for non-job reasons."""
+
+    pipeline_log_stream: str
+    aoi_name: str
+    batch_name: str
+    collection: Optional[str]
+    timestamp: Optional[str] = None
+    failure_reason: str = "No 'INFO Pipeline SUCCESS' message found"
+
+
+@dataclass
 class ErrorAnalysisResult:
     """Results from error analysis with both detailed and deduplicated information."""
 

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
-from .models import FailedJobInfo, UniqueErrorInfo
+from .models import FailedJobInfo, FailedPipelineInfo, UniqueErrorInfo
 
 logger = logging.getLogger(__name__)
 
@@ -225,4 +225,33 @@ class ReportGenerator:
             json.dump(analysis_results, f, indent=2, default=str)
 
         logger.info(f"Generated summary report: {output_file}")
+        return str(output_file)
+
+    def generate_failed_pipelines_report(self, failed_pipelines: List[FailedPipelineInfo]) -> str:
+        """Generate CSV report of pipelines that failed for non-job reasons."""
+        output_file = self.output_dir / "failed_pipelines.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = [
+                "pipeline_log_stream", 
+                "aoi_name", 
+                "batch_name", 
+                "collection", 
+                "timestamp", 
+                "failure_reason"
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            for pipeline in failed_pipelines:
+                writer.writerow({
+                    "pipeline_log_stream": pipeline.pipeline_log_stream,
+                    "aoi_name": pipeline.aoi_name,
+                    "batch_name": pipeline.batch_name,
+                    "collection": pipeline.collection or "",
+                    "timestamp": pipeline.timestamp or "",
+                    "failure_reason": pipeline.failure_reason
+                })
+
+        logger.info(f"Generated failed pipelines report: {output_file}")
         return str(output_file)

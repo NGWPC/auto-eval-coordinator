@@ -59,6 +59,7 @@ def main():
         print(f"\nBatch Run Analysis Complete!")
         print(f"Batch: {results['batch_name']}")
         print(f"Failed jobs: {results['failed_jobs_count']}")
+        print(f"Failed pipelines (non-job failures): {results['failed_pipelines_count']}")
         print(f"Unhandled exceptions: {results['unhandled_exceptions_count']}")
         print(f"Submitted pipelines: {results['submitted_pipelines_count']}")
 

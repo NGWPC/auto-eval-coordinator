@@ -9,7 +9,7 @@ from typing import Dict, List, Set
 import boto3
 
 from .error_patterns import ErrorPatternExtractor
-from .models import DebugConfig, ErrorAnalysisResult, FailedJobInfo, UniqueErrorInfo
+from .models import DebugConfig, ErrorAnalysisResult, FailedJobInfo, FailedPipelineInfo, UniqueErrorInfo
 
 logger = logging.getLogger(__name__)
 
@@ -495,3 +495,91 @@ class CloudWatchAnalyzer:
 
         logger.info(f"Found {len(unique_exceptions)} unique unhandled exception patterns")
         return unique_exceptions
+
+    def find_failed_pipelines(self) -> List[FailedPipelineInfo]:
+        """Find pipelines that failed for non-job reasons (missing 'INFO Pipeline SUCCESS' message)."""
+        logger.info("Finding pipelines that failed for non-job reasons...")
+
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
+        # Get all submitted pipeline streams
+        submitted_streams = self.find_submitted_pipelines()
+        
+        if not submitted_streams:
+            logger.warning("No submitted pipeline streams found")
+            return []
+
+        logger.info(f"Checking {len(submitted_streams)} pipeline streams for success messages...")
+
+        failed_pipelines = []
+        
+        # Process streams in chunks to avoid query size limits
+        chunk_size = 20
+        stream_list = list(submitted_streams)
+        
+        for i in range(0, len(stream_list), chunk_size):
+            chunk = stream_list[i:i + chunk_size]
+            
+            # Query for SUCCESS messages in pipeline logs
+            streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in chunk])
+            
+            success_query = f"""
+            fields @logStream, @timestamp
+            | filter ({streams_filter}) and @message like /INFO Pipeline SUCCESS/
+            | stats count() by @logStream
+            """
+            
+            success_results = self.run_query(self.config.pipeline_log_group, success_query)
+            
+            # Track which streams have success messages
+            successful_streams = set()
+            for result in success_results:
+                stream = self._get_field_value(result, "@logStream")
+                if stream:
+                    successful_streams.add(stream)
+            
+            # Find streams in this chunk that don't have success messages
+            for stream in chunk:
+                if stream not in successful_streams:
+                    # Extract AOI name from stream name
+                    aoi_name = self._extract_aoi_from_stream(stream)
+                    
+                    # Get the latest timestamp for this stream
+                    timestamp_query = f"""
+                    fields @timestamp
+                    | filter @logStream = "{stream}"
+                    | sort @timestamp desc
+                    | limit 1
+                    """
+                    
+                    timestamp_results = self.run_query(self.config.pipeline_log_group, timestamp_query)
+                    timestamp = None
+                    if timestamp_results:
+                        timestamp = self._get_field_value(timestamp_results[0], "@timestamp")
+                    
+                    failed_pipelines.append(
+                        FailedPipelineInfo(
+                            pipeline_log_stream=stream,
+                            aoi_name=aoi_name,
+                            batch_name=self.config.batch_name,
+                            collection=self.config.collection,
+                            timestamp=timestamp,
+                            failure_reason="No 'INFO Pipeline SUCCESS' message found"
+                        )
+                    )
+
+        logger.info(f"Found {len(failed_pipelines)} pipelines that failed for non-job reasons")
+        return failed_pipelines
+
+    def _extract_aoi_from_stream(self, stream: str) -> str:
+        """Extract AOI name from pipeline log stream name."""
+        # Pattern: pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]
+        pattern = r"aoi_name=([^,\]]+)"
+        match = re.search(pattern, stream)
+        if match:
+            return match.group(1)
+        return "unknown"

@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .models import FailedJobInfo, UniqueErrorInfo
+from .models import FailedJobInfo, FailedPipelineInfo, UniqueErrorInfo
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class HTMLGenerator:
         missing_aois: List[str] = None,
         unique_errors: List[UniqueErrorInfo] = None,
         unique_unhandled_exceptions: List[UniqueErrorInfo] = None,
+        failed_pipelines: List[FailedPipelineInfo] = None,
     ) -> str:
         """Generate HTML dashboard from analysis results."""
         
@@ -74,6 +75,13 @@ class HTMLGenerator:
             context.update({
                 'missing_aois_count': analysis_results.get('missing_aois_count', 0),
                 'missing_aois': missing_aois or [],
+            })
+        
+        # Add failed pipelines data if available
+        if failed_pipelines is not None:
+            context.update({
+                'failed_pipelines_count': analysis_results.get('failed_pipelines_count', 0),
+                'failed_pipelines': failed_pipelines or [],
             })
         
         # Render template
