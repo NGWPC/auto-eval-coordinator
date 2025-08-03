@@ -55,11 +55,17 @@ class CloudWatchAnalyzer:
         """Find all failed jobs and extract their error information."""
         logger.info("Step 1: Finding failed jobs...")
 
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
         # Query to find failed jobs with job stream names
         failed_jobs_query = f"""
         fields @timestamp, @logStream as pipeline_log_stream
         | parse @message 'Job * ' as job_stream_name
-        | filter @logStream like /pipeline\\/dispatch-\\[batch_name={self.config.batch_name}.*\\]/
+        | filter @logStream like {stream_filter}
         | filter @message like /JobStatus.FAILED/
         | sort @timestamp desc
         | display @timestamp, pipeline_log_stream, job_stream_name
@@ -117,11 +123,17 @@ class CloudWatchAnalyzer:
         """Find jobs with unhandled exceptions (non-JSON formatted errors)."""
         logger.info("Finding unhandled exceptions...")
 
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
         # First get failed jobs
         failed_jobs_query = f"""
         fields @logStream as pipeline_log_stream
         | parse @message 'Job * ' as job_stream_name
-        | filter @logStream like /pipeline\\/dispatch-\\[batch_name={self.config.batch_name}.*\\]/
+        | filter @logStream like {stream_filter}
         | filter @message like /JobStatus.FAILED/
         | display pipeline_log_stream, job_stream_name
         """
@@ -172,9 +184,15 @@ class CloudWatchAnalyzer:
         """Find all pipelines that were submitted for this batch."""
         logger.info("Finding submitted pipelines...")
 
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
         submitted_query = f"""
         fields @logStream
-        | filter @logStream like /pipeline\\/dispatch-\\[batch_name={self.config.batch_name}.*\\]/
+        | filter @logStream like {stream_filter}
         | stats count() by @logStream
         """
 
@@ -197,8 +215,13 @@ class CloudWatchAnalyzer:
         submitted_streams = self.find_submitted_pipelines()
         
         # Extract AOI names from log stream names
-        # Pattern: pipeline/dispatch-[batch_name=X,aoi_name=Y]
-        pattern = r'pipeline/dispatch-\[batch_name=' + re.escape(self.config.batch_name) + r',aoi_name=([^\]]+)\]'
+        # Pattern: pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]
+        if self.config.collection:
+            # If collection is specified, include it in the pattern
+            pattern = r'pipeline/dispatch-\[batch_name=' + re.escape(self.config.batch_name) + r',aoi_name=([^,\]]+),collection=' + re.escape(self.config.collection) + r'\]'
+        else:
+            # Otherwise, match any collection
+            pattern = r'pipeline/dispatch-\[batch_name=' + re.escape(self.config.batch_name) + r',aoi_name=([^,\]]+)(?:,collection=[^\]]+)?\]'
         
         actual_aois = set()
         for stream in submitted_streams:
@@ -212,7 +235,10 @@ class CloudWatchAnalyzer:
         missing_aois = expected_aois_set - actual_aois
         
         logger.info(f"Expected AOIs: {len(expected_aois_set)}")
-        logger.info(f"Found AOIs with logs: {len(actual_aois)}")
+        if self.config.collection:
+            logger.info(f"Found AOIs with logs (collection={self.config.collection}): {len(actual_aois)}")
+        else:
+            logger.info(f"Found AOIs with logs: {len(actual_aois)}")
         logger.info(f"Missing AOIs: {len(missing_aois)}")
         
         return sorted(list(missing_aois))
@@ -231,11 +257,17 @@ class CloudWatchAnalyzer:
         """
         logger.info("Step 1: Finding failed jobs with optimized error analysis...")
 
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
         # Single query to get all failed jobs
         failed_jobs_query = f"""
         fields @timestamp, @logStream as pipeline_log_stream
         | parse @message 'Job * ' as job_stream_name  
-        | filter @logStream like /pipeline\\/dispatch-\\[batch_name={self.config.batch_name}.*\\]/
+        | filter @logStream like {stream_filter}
         | filter @message like /JobStatus.FAILED/
         | sort @timestamp desc
         """
@@ -354,11 +386,17 @@ class CloudWatchAnalyzer:
         """
         logger.info("Finding unhandled exceptions with optimization...")
 
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+
         # Get failed job streams first
         failed_jobs_query = f"""
         fields @logStream as pipeline_log_stream
         | parse @message 'Job * ' as job_stream_name
-        | filter @logStream like /pipeline\\/dispatch-\\[batch_name={self.config.batch_name}.*\\]/
+        | filter @logStream like {stream_filter}
         | filter @message like /JobStatus.FAILED/
         | display pipeline_log_stream, job_stream_name
         """

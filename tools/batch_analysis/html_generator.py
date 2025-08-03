@@ -44,6 +44,7 @@ class HTMLGenerator:
         # Prepare template context
         context = {
             'batch_name': analysis_results.get('batch_name', 'Unknown'),
+            'collection': analysis_results.get('collection', None),
             'analysis_timestamp': analysis_results.get('analysis_timestamp', 'Unknown'),
             'time_range_days': analysis_results.get('time_range_days', 'Unknown'),
             'submitted_pipelines_count': analysis_results.get('submitted_pipelines_count', 0),

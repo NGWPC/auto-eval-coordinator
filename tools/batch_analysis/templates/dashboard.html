@@ -263,6 +263,9 @@
             <h1>Batch Run Analysis Dashboard</h1>
             <div class="header-meta">
                 <strong>Batch:</strong> {{ batch_name }} |
+                {% if collection %}
+                <strong>Collection:</strong> {{ collection }} |
+                {% endif %}
                 <strong>Generated:</strong> {{ analysis_timestamp }} |
                 <strong>Time Range:</strong> {{ time_range_days }} days
             </div>
@@ -534,7 +537,7 @@
                             {% for aoi_id in missing_aois %}
                             <tr>
                                 <td><code>{{ aoi_id }}</code></td>
-                                <td><code>pipeline/dispatch-[batch_name={{ batch_name }},aoi_name={{ aoi_id }}]</code></td>
+                                <td><code>pipeline/dispatch-[batch_name={{ batch_name }},aoi_name={{ aoi_id }},collection={% if collection %}{{ collection }}{% else %}*{% endif %}]</code></td>
                             </tr>
                             {% endfor %}
                         </tbody>

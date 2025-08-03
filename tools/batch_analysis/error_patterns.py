@@ -19,6 +19,7 @@ class ErrorPatternExtractor:
         (r'pipeline-[a-zA-Z0-9-]+', '[PIPELINE_ID]'),
         (r'aoi_name=[^,\]]+', 'aoi_name=[AOI_NAME]'),
         (r'batch_name=[^,\]]+', 'batch_name=[BATCH_NAME]'),
+        (r'collection=[^,\]]+', 'collection=[COLLECTION]'),
         
         # Remove specific file paths but keep the pattern
         (r'/[a-zA-Z0-9_/.-]+/([^/\s]+\.(py|json|txt|csv|tif|tiff))', r'/[PATH]/\1'),

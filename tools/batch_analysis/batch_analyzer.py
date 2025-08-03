@@ -29,6 +29,7 @@ class BatchRunAnalyzer:
 
         results = {
             "batch_name": self.config.batch_name,
+            "collection": self.config.collection,
             "time_range_days": self.config.time_range_days,
             "analysis_timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
             "reports_generated": [],
@@ -104,7 +105,7 @@ class BatchRunAnalyzer:
 
         # Generate missing AOIs report
         if missing_aois:
-            report_file = self.report_generator.generate_missing_aois_report(missing_aois, self.config.batch_name)
+            report_file = self.report_generator.generate_missing_aois_report(missing_aois, self.config.batch_name, self.config.collection)
             results["reports_generated"].append(report_file)
 
         # S3 metrics analysis

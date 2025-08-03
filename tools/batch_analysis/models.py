@@ -16,6 +16,7 @@ class DebugConfig:
     s3_output_root: Optional[str] = None
     generate_html: bool = False
     aoi_list_path: Optional[str] = None
+    collection: Optional[str] = None
 
 
 @dataclass

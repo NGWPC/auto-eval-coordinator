@@ -84,21 +84,25 @@ class ReportGenerator:
         logger.info(f"Generated missing pipelines report: {output_file}")
         return str(output_file)
 
-    def generate_missing_aois_report(self, missing_aois: List[str], batch_name: str) -> str:
+    def generate_missing_aois_report(self, missing_aois: List[str], batch_name: str, collection: str = None) -> str:
         """Generate CSV report of AOIs that have no corresponding pipeline logs."""
         output_file = self.output_dir / "missing_aois.csv"
 
         with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["aoi_id", "batch_name", "expected_log_stream_pattern"]
+            fieldnames = ["aoi_id", "batch_name", "collection", "expected_log_stream_pattern"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
             for aoi_id in missing_aois:
-                expected_pattern = f"pipeline/dispatch-[batch_name={batch_name},aoi_name={aoi_id}]"
+                if collection:
+                    expected_pattern = f"pipeline/dispatch-[batch_name={batch_name},aoi_name={aoi_id},collection={collection}]"
+                else:
+                    expected_pattern = f"pipeline/dispatch-[batch_name={batch_name},aoi_name={aoi_id},collection=*]"
                 writer.writerow(
                     {
                         "aoi_id": aoi_id,
                         "batch_name": batch_name,
+                        "collection": collection if collection else "any",
                         "expected_log_stream_pattern": expected_pattern,
                     }
                 )

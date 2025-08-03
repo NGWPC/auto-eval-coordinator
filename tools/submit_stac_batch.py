@@ -60,6 +60,7 @@ def submit_pipeline_job(
     output_root: str,
     hand_index_path: str,
     benchmark_sources: str,
+    collection_id: str,
     nomad_token: Optional[str] = None,
     use_local_creds: bool = False,
 ) -> str:
@@ -91,8 +92,8 @@ def submit_pipeline_job(
             }
         )
 
-    # Create the id_prefix_template in the format [batch_name=value,aoi_name=value]
-    id_prefix_template = f"[batch_name={batch_name},aoi_name={item_id}]"
+    # Create the id_prefix_template in the format [batch_name=value,aoi_name=value,collection=value]
+    id_prefix_template = f"[batch_name={batch_name},aoi_name={item_id},collection={collection_id}]"
 
     result = nomad_client.job.dispatch_job(
         id_="pipeline", payload=None, meta=meta, id_prefix_template=id_prefix_template
@@ -130,12 +131,12 @@ def get_running_pipeline_jobs(nomad_client: nomad.Nomad) -> int:
 
 def extract_items(
     item_ids: List[str], temp_dir: Path, stac_api_url: str, collection: Optional[str] = None
-) -> Dict[str, Path]:
+) -> Dict[str, tuple[Path, str]]:
     """
     Extract STAC item geometries and save as individual gpkg files.
 
     Returns:
-        Dict mapping item IDs to their gpkg file paths
+        Dict mapping item IDs to tuples of (gpkg file path, collection ID)
     """
     item_files = {}
 
@@ -160,8 +161,8 @@ def extract_items(
             output_file = temp_dir / f"stac_{item_id}.gpkg"
             gdf.to_file(output_file, driver="GPKG")
 
-            item_files[item_id] = output_file
-            logging.info(f"Saved STAC item {item_id} to {output_file}")
+            item_files[item_id] = (output_file, collection_id)
+            logging.info(f"Saved STAC item {item_id} (collection: {collection_id}) to {output_file}")
 
         except Exception as e:
             logging.error(f"Failed to extract STAC item {item_id}: {e}")
@@ -248,13 +249,13 @@ def main():
     s3_base = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
 
     logging.info(f"Uploading AOI files to {s3_base}")
-    for item_id, local_path in item_files.items():
+    for item_id, (local_path, collection_id) in item_files.items():
         s3_path = f"{s3_base}/stac_{item_id}.gpkg"
         try:
             with open(local_path, "rb") as local_file:
                 with s3_fs.open(s3_path, "wb") as s3_file:
                     s3_file.write(local_file.read())
-            s3_aoi_paths[item_id] = s3_path
+            s3_aoi_paths[item_id] = (s3_path, collection_id)
             logging.info(f"Uploaded {local_path} to {s3_path}")
         except Exception as e:
             logging.error(f"Failed to upload AOI for STAC item {item_id}: {e}")
@@ -280,7 +281,7 @@ def main():
 
     logging.info(f"Starting job submission for {len(s3_aoi_paths)} STAC items")
 
-    for item_id, s3_path in s3_aoi_paths.items():
+    for item_id, (s3_path, collection_id) in s3_aoi_paths.items():
         # Wait for pipeline slots if max limit specified
         if args.max_pipelines is not None:
             while True:
@@ -294,7 +295,7 @@ def main():
                 )
                 time.sleep(wait_time)
 
-        logging.info(f"Submitting job for STAC item {item_id}")
+        logging.info(f"Submitting job for STAC item {item_id} (collection: {collection_id})")
 
         try:
             job_id = submit_pipeline_job(
@@ -305,6 +306,7 @@ def main():
                 output_root=args.output_root,
                 hand_index_path=args.hand_index_path,
                 benchmark_sources=args.benchmark_sources,
+                collection_id=collection_id,
                 nomad_token=args.nomad_token,
                 use_local_creds=args.use_local_creds,
             )

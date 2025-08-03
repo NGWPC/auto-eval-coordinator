@@ -9,6 +9,10 @@ declare -a RESOLUTIONS=("10" "5" "3")
 
 declare -a COLLECTIONS=("ble-collection" "nws-fim-collection" "ripple-fim-collection" "usgs-fim-collection")
 
+# Space-separated list of completed runs in format "collection:resolution"
+# Example: COMPLETED="ble-collection:10 nws-fim-collection:3"
+COMPLETED=""
+
 # Generate timestamp in format: YYYY-MM-DD-HH (e.g., 2025-08-01-14 for 2PM on Aug 1, 2025)
 TIMESTAMP=$(date +"%Y-%m-%d-%H")
 
@@ -43,6 +47,12 @@ for resolution in "${RESOLUTIONS[@]}"; do
     for collection in "${COLLECTIONS[@]}"; do
         echo "--- Processing Collection: $collection ---"
         
+        # Check if this collection:resolution combination has been completed
+        if [[ " $COMPLETED " =~ " ${collection}:${resolution} " ]]; then
+            echo "✓ Already completed. Skipping ${collection} at ${resolution}m..."
+            continue
+        fi
+        
         # Define collection-specific parameters
         item_list_file="$INPUTS_DIR/${collection}.txt"
         
@@ -53,7 +63,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         fi
         
         # Build the submit_stac_batch.py command
-        submit_cmd="python ./tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 150" # Scaling tests showed you shouldn't go above 150 pipelines with current Nomad deploy.
+        submit_cmd="python ./tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 5 --max_pipelines 150" # Scaling tests showed you shouldn't go above ~200 pipelines with current Nomad deploy.
         
         # Get user confirmation and execute
         if confirm_command "$submit_cmd"; then
@@ -67,6 +77,43 @@ for resolution in "${RESOLUTIONS[@]}"; do
             fi
         else
             continue
+        fi
+        
+        # Refresh AWS credentials before generating report
+        echo "--- Refreshing AWS Credentials for $collection report ---"
+        echo "Configuring AWS SSO..."
+        aws configure sso
+        if [[ $? -ne 0 ]]; then
+            echo "Error: AWS SSO configuration failed"
+            read -p "Continue anyway? (y/n): " -n 1 -r
+            echo ""
+            [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+        fi
+        
+        if [[ -f "./update_aws_creds.sh" ]]; then
+            echo "Running update_aws_creds.sh..."
+            ./update_aws_creds.sh
+            if [[ $? -ne 0 ]]; then
+                echo "Warning: update_aws_creds.sh failed"
+            fi
+        else
+            echo "Warning: update_aws_creds.sh not found, skipping"
+        fi
+        
+        # Generate report for this collection before purging
+        echo "--- Generating Report for $collection at ${resolution}m ---"
+        collection_reports_dir="../reports/${batch_name}_${collection}"
+        collection_report_cmd="python tools/batch_run_reports.py --batch_name $batch_name --output_dir $collection_reports_dir --pipeline_log_group /aws/ec2/nomad-client-linux-test --job_log_group /aws/ec2/nomad-client-linux-test --s3_output_root $output_root --aoi_list $item_list_file --html"
+        
+        if confirm_command "$collection_report_cmd"; then
+            echo "Executing batch_run_reports.py for $collection..."
+            eval $collection_report_cmd
+            if [[ $? -ne 0 ]]; then
+                echo "Warning: batch_run_reports.py failed for $collection"
+            else
+                echo "Reports generated for $collection at: $collection_reports_dir"
+                echo "View dashboard: $collection_reports_dir/batch_analysis_dashboard.html"
+            fi
         fi
         
         # Purge dispatch jobs after each collection
@@ -96,43 +143,6 @@ for resolution in "${RESOLUTIONS[@]}"; do
             read -p "Continue with next resolution? (y/n): " -n 1 -r
             echo ""
             [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
-        fi
-    fi
-    
-    # Refresh AWS credentials before batch analysis
-    echo "--- Refreshing AWS Credentials ---"
-    echo "Configuring AWS SSO..."
-    aws configure sso
-    if [[ $? -ne 0 ]]; then
-        echo "Error: AWS SSO configuration failed"
-        read -p "Continue anyway? (y/n): " -n 1 -r
-        echo ""
-        [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
-    fi
-    
-    if [[ -f "./update_aws_creds.sh" ]]; then
-        echo "Running update_aws_creds.sh..."
-        ./update_aws_creds.sh
-        if [[ $? -ne 0 ]]; then
-            echo "Warning: update_aws_creds.sh failed"
-        fi
-    else
-        echo "Warning: update_aws_creds.sh not found, skipping"
-    fi
-    
-    # Generate batch analysis reports
-    echo "--- Generating Batch Reports for ${resolution}m ---"
-    reports_output_dir="../reports/$batch_name"
-    reports_cmd="python tools/batch_run_reports.py --batch_name $batch_name --output_dir $reports_output_dir --pipeline_log_group /aws/ec2/nomad-client-linux-test --job_log_group /aws/ec2/nomad-client-linux-test --s3_output_root $output_root --aoi_list $item_list_file --html"
-    
-    if confirm_command "$reports_cmd"; then
-        echo "Executing batch_run_reports.py..."
-        eval $reports_cmd
-        if [[ $? -ne 0 ]]; then
-            echo "Warning: batch_run_reports.py failed for ${resolution}m"
-        else
-            echo "Reports generated at: $reports_output_dir"
-            echo "View dashboard: $reports_output_dir/batch_analysis_dashboard.html"
         fi
     fi
     

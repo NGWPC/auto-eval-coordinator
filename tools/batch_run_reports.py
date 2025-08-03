@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--s3_output_root", help="S3 root path for pipeline outputs (for metrics analysis)")
     parser.add_argument("--html", action="store_true", help="Generate HTML dashboard in addition to CSV reports")
     parser.add_argument("--aoi_list", help="Path to AOI list file (same format as used by submit_stac_batch.py) for missing pipeline detection")
+    parser.add_argument("--collection", help="Optional: filter results to only a specific collection within the batch")
 
     args = parser.parse_args()
 
@@ -46,6 +47,7 @@ def main():
         s3_output_root=args.s3_output_root,
         generate_html=args.html,
         aoi_list_path=args.aoi_list,
+        collection=args.collection,
     )
 
     try:
@@ -67,6 +69,9 @@ def main():
             print(f"Missing metrics files: {results['missing_metrics_count']}")
             print(f"Empty/invalid metrics files: {results['empty_metrics_count']}")
             print(f"Missing agg_metrics files: {results['missing_agg_metrics_count']}")
+
+        if config.collection:
+            print(f"\nFiltered by collection: {config.collection}")
 
         print(f"\nReports saved to: {config.output_dir}")
 
