@@ -99,6 +99,8 @@ class NomadJobManager:
         max_concurrent_dispatch: int = 2,
         polling_interval: int = 30,
         polling_escalation_timeout: int = 1800,  # Time after which a job's status is aggressively polled until resolved
+        filter_events_by_jobs: bool = True,  # Filter event stream to only tracked jobs
+        job_list_change_threshold: int = 5,  # Reconnect stream when job list changes by this many jobs
     ):
         self.nomad_addr = nomad_addr
         self.namespace = namespace
@@ -108,6 +110,8 @@ class NomadJobManager:
         self.max_concurrent_dispatch = max_concurrent_dispatch
         self.polling_interval = polling_interval
         self.polling_escalation_timeout = polling_escalation_timeout
+        self.filter_events_by_jobs = filter_events_by_jobs
+        self.job_list_change_threshold = job_list_change_threshold
 
         parsed = urlparse(str(nomad_addr))
         self.client = nomad.Nomad(
@@ -130,6 +134,10 @@ class NomadJobManager:
 
         self._event_index = 0
         self._last_event_time = time.time()
+
+        # Job list tracking for stream reconnection
+        self._stream_job_list: Set[str] = set()
+        self._stream_restart_event = asyncio.Event()
 
     async def start(self):
         if not self._monitoring_task:
@@ -192,6 +200,9 @@ class NomadJobManager:
         )
         self._active_jobs[job_id] = tracker
 
+        # Check if job list change should trigger stream restart
+        await self._maybe_restart_event_stream()
+
         # Update database if available
         await self._update_job_status(tracker)
 
@@ -218,6 +229,8 @@ class NomadJobManager:
 
         finally:
             self._active_jobs.pop(job_id, None)
+            # Check if job list change should trigger stream restart
+            await self._maybe_restart_event_stream()
 
     async def _dispatch_job(
         self,
@@ -265,6 +278,9 @@ class NomadJobManager:
 
         while not self._shutdown_event.is_set():
             try:
+                # Clear restart event before starting stream
+                self._stream_restart_event.clear()
+
                 logger.debug(f"Starting event stream (attempt {retry_count + 1})")
                 await self._process_event_stream()
                 # If we get here, stream ended gracefully
@@ -321,11 +337,27 @@ class NomadJobManager:
             "namespace": self.namespace,
         }
 
+        # Add job filtering if enabled and we have active jobs
+        if self.filter_events_by_jobs and self._active_jobs:
+            job_ids = list(self._active_jobs.keys())
+            # Update tracked job list for stream
+            self._stream_job_list = set(job_ids)
+            # Nomad expects comma-separated job IDs
+            params["jobs"] = ",".join(job_ids)
+            logger.debug(
+                f"Filtering event stream to {len(job_ids)} jobs: {job_ids[:3]}{'...' if len(job_ids) > 3 else ''}"
+            )
+        else:
+            self._stream_job_list = set()
+
         headers = {}
         if self.token:
             headers["X-Nomad-Token"] = self.token
 
-        logger.debug(f"Connecting to event stream: {url} (index: {self._event_index})")
+        job_filter_info = (
+            f" (filtered to {len(self._stream_job_list)} jobs)" if self._stream_job_list else " (all jobs)"
+        )
+        logger.debug(f"Connecting to event stream: {url} (index: {self._event_index}){job_filter_info}")
 
         async with self.session.get(url, params=params, headers=headers) as response:
             response.raise_for_status()
@@ -333,6 +365,11 @@ class NomadJobManager:
             buffer = b""
             async for chunk in response.content.iter_chunked(8 * 1024):
                 if self._shutdown_event.is_set():
+                    break
+
+                # Check if we need to restart the stream due to job list changes
+                if self._stream_restart_event.is_set():
+                    logger.info("Event stream restart requested, closing current connection")
                     break
 
                 buffer += chunk
@@ -358,6 +395,11 @@ class NomadJobManager:
                         logger.debug(f"Failed to parse event line: {line}")
                     except Exception as e:
                         logger.error(f"Error handling event: {e}")
+
+                    # Check for restart again after processing events
+                    if self._stream_restart_event.is_set():
+                        logger.info("Event stream restart requested during event processing")
+                        break
 
     async def _polling_fallback(self):
         """Fallback polling mechanism to catch missed job completions."""
@@ -532,6 +574,22 @@ class NomadJobManager:
         except Exception as e:
             logger.error(f"Unexpected error polling job {tracker.job_id}: {e}")
             # Unknown exceptions are treated as potentially transient
+
+    async def _maybe_restart_event_stream(self):
+        """Check if job list changes warrant restarting the event stream."""
+        if not self.filter_events_by_jobs:
+            return
+
+        current_jobs = set(self._active_jobs.keys())
+        job_list_change = len(current_jobs.symmetric_difference(self._stream_job_list))
+
+        # Restart stream if job list changed significantly
+        if job_list_change >= self.job_list_change_threshold:
+            logger.info(
+                f"Job list changed by {job_list_change} jobs (threshold: {self.job_list_change_threshold}), "
+                f"triggering event stream restart"
+            )
+            self._stream_restart_event.set()
 
     async def _reconcile_job_status(self, tracker: JobTracker):
         """Check if a job has already completed before we started tracking it."""
