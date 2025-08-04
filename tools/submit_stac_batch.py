@@ -5,49 +5,61 @@ import sys
 import time
 from functools import wraps
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Any
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 import fsspec
 import nomad
 
-from extract_stac_geometries import extract_geometry_by_stac_id, should_use_convex_hull
+from extract_stac_geometries import (
+    extract_geometry_by_stac_id,
+    should_use_convex_hull,
+)
 
 
 def retry_with_backoff(max_retries: int = 2, backoff_base: float = 2.0):
     """
     Decorator to add retry logic with exponential backoff to functions.
-    
+
     Args:
         max_retries: Maximum number of retry attempts (default: 2)
         backoff_base: Base for exponential backoff calculation (default: 2.0)
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             last_exception = None
             func_name = func.__name__
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     result = func(*args, **kwargs)
-                    
+
                     if attempt > 0:
-                        logging.info(f"Function {func_name} succeeded on attempt {attempt + 1}")
-                    
+                        logging.info(
+                            f"Function {func_name} succeeded on attempt {attempt + 1}"
+                        )
+
                     return result
-                    
+
                 except Exception as e:
                     last_exception = e
                     if attempt < max_retries:
-                        wait_time = backoff_base ** attempt
-                        logging.warning(f"Function {func_name} failed (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying in {wait_time} seconds...")
+                        wait_time = backoff_base**attempt
+                        logging.warning(
+                            f"Function {func_name} failed (attempt {attempt + 1}/{max_retries + 1}): {e}. Retrying in {wait_time} seconds..."
+                        )
                         time.sleep(wait_time)
                     else:
-                        logging.error(f"Function {func_name} failed after {max_retries + 1} attempts: {e}")
-            
+                        logging.error(
+                            f"Function {func_name} failed after {max_retries + 1} attempts: {e}"
+                        )
+
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
@@ -96,7 +108,10 @@ def submit_pipeline_job(
     id_prefix_template = f"[batch_name={batch_name},aoi_name={item_id},collection={collection_id}]"
 
     result = nomad_client.job.dispatch_job(
-        id_="pipeline", payload=None, meta=meta, id_prefix_template=id_prefix_template
+        id_="pipeline",
+        payload=None,
+        meta=meta,
+        id_prefix_template=id_prefix_template,
     )
 
     return result["DispatchedJobID"]
@@ -112,25 +127,34 @@ def get_running_pipeline_jobs(nomad_client: nomad.Nomad) -> int:
     """
     # Get all jobs to include dispatched jobs that haven't been allocated yet
     jobs = nomad_client.jobs.get_jobs()
-    pipeline_jobs = [job for job in jobs if job.get("ID", "").startswith("pipeline")]
+    pipeline_jobs = [
+        job for job in jobs if job.get("ID", "").startswith("pipeline")
+    ]
 
     running_count = 0
     for job in pipeline_jobs:
         job_status = job.get("Status", "")
         # Debug logging to see actual job statuses
-        logging.debug(f"Pipeline job {job.get('ID', 'unknown')}: Status={job_status}")
+        logging.debug(
+            f"Pipeline job {job.get('ID', 'unknown')}: Status={job_status}"
+        )
 
         # Count jobs that are not finished (dead = finished)
         # "running" includes both allocated jobs and dispatched jobs waiting for allocation
         if job_status != "dead":
             running_count += 1
 
-    logging.debug(f"Found {running_count} active pipeline jobs out of {len(pipeline_jobs)} total pipeline jobs")
+    logging.debug(
+        f"Found {running_count} active pipeline jobs out of {len(pipeline_jobs)} total pipeline jobs"
+    )
     return running_count
 
 
 def extract_items(
-    item_ids: List[str], temp_dir: Path, stac_api_url: str, collection: Optional[str] = None
+    item_ids: List[str],
+    temp_dir: Path,
+    stac_api_url: str,
+    collection: Optional[str] = None,
 ) -> Dict[str, tuple[Path, str]]:
     """
     Extract STAC item geometries and save as individual gpkg files.
@@ -146,15 +170,23 @@ def extract_items(
 
             # First, fetch without convex hull to get collection info
             gdf = extract_geometry_by_stac_id(
-                item_id, stac_api_url=stac_api_url, collection=collection, use_convex_hull=False
+                item_id,
+                stac_api_url=stac_api_url,
+                collection=collection,
+                use_convex_hull=False,
             )
 
             # Check if we should use convex hull based on collection
             collection_id = gdf.iloc[0]["collection"]
             if should_use_convex_hull(collection_id):
-                logging.info(f"Applying convex hull for collection {collection_id}")
+                logging.info(
+                    f"Applying convex hull for collection {collection_id}"
+                )
                 gdf = extract_geometry_by_stac_id(
-                    item_id, stac_api_url=stac_api_url, collection=collection, use_convex_hull=True
+                    item_id,
+                    stac_api_url=stac_api_url,
+                    collection=collection,
+                    use_convex_hull=True,
                 )
 
             # Save to temp file
@@ -162,7 +194,9 @@ def extract_items(
             gdf.to_file(output_file, driver="GPKG")
 
             item_files[item_id] = (output_file, collection_id)
-            logging.info(f"Saved STAC item {item_id} (collection: {collection_id}) to {output_file}")
+            logging.info(
+                f"Saved STAC item {item_id} (collection: {collection_id}) to {output_file}"
+            )
 
         except Exception as e:
             logging.error(f"Failed to extract STAC item {item_id}: {e}")
@@ -172,54 +206,96 @@ def extract_items(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Submit batch of pipeline jobs for multiple STAC items")
+    parser = argparse.ArgumentParser(
+        description="Submit batch of pipeline jobs for multiple STAC items"
+    )
 
     # Required arguments
-    parser.add_argument("--batch_name", required=True, help="Name for this batch of jobs (passed as tag)")
+    parser.add_argument(
+        "--batch_name",
+        required=True,
+        help="Name for this batch of jobs (passed as tag)",
+    )
     parser.add_argument(
         "--output_root",
         required=True,
         help="Root directory for outputs (STAC item ID will be appended to create an individual pipelines output path)",
     )
-    parser.add_argument("--hand_index_path", required=True, help="Path to HAND index (passed to pipeline)")
     parser.add_argument(
-        "--benchmark_sources", required=True, help="Comma-separated benchmark sources (passed to pipeline)"
+        "--hand_index_path",
+        required=True,
+        help="Path to HAND index (passed to pipeline)",
     )
-    parser.add_argument("--item_list", required=True, help="Path to text file with STAC item IDs (one per line)")
+    parser.add_argument(
+        "--benchmark_sources",
+        required=True,
+        help="Comma-separated benchmark sources (passed to pipeline)",
+    )
+    parser.add_argument(
+        "--item_list",
+        required=True,
+        help="Path to text file with STAC item IDs (one per line)",
+    )
 
     # Optional arguments
     parser.add_argument(
-        "--temp_dir", default="/tmp/stac_batch", help="Temporary directory for extracted STAC item .gpkg files"
+        "--temp_dir",
+        default="/tmp/stac_batch",
+        help="Temporary directory for extracted STAC item .gpkg files",
     )
-    parser.add_argument("--wait_seconds", type=int, default=0, help="Seconds to wait between job submissions")
     parser.add_argument(
-        "--max_pipelines", type=int, help="Maximum number of pipeline jobs to allow running/queued concurrently"
+        "--wait_seconds",
+        type=int,
+        default=0,
+        help="Seconds to wait between job submissions",
+    )
+    parser.add_argument(
+        "--max_pipelines",
+        type=int,
+        help="Maximum number of pipeline jobs to allow running/queued concurrently",
     )
 
     # Nomad connection arguments
     parser.add_argument(
-        "--nomad_addr", default=os.environ.get("NOMAD_ADDR", "http://localhost:4646"), help="Nomad server address"
+        "--nomad_addr",
+        default=os.environ.get("NOMAD_ADDR", "http://localhost:4646"),
+        help="Nomad server address",
     )
     parser.add_argument(
-        "--nomad_namespace", default=os.environ.get("NOMAD_NAMESPACE", "default"), help="Nomad namespace"
+        "--nomad_namespace",
+        default=os.environ.get("NOMAD_NAMESPACE", "default"),
+        help="Nomad namespace",
     )
-    parser.add_argument("--nomad_token", default=os.environ.get("NOMAD_TOKEN"), help="Nomad ACL token")
+    parser.add_argument(
+        "--nomad_token",
+        default=os.environ.get("NOMAD_TOKEN"),
+        help="Nomad ACL token",
+    )
 
     # AWS authentication arguments
     parser.add_argument(
-        "--use-local-creds", action="store_true", help="Use AWS credentials from shell environment instead of IAM roles"
+        "--use-local-creds",
+        action="store_true",
+        help="Use AWS credentials from shell environment instead of IAM roles",
     )
 
     # STAC-specific arguments
     parser.add_argument(
-        "--stac_api_url", default="http://benchmark-stac.test.nextgenwaterprediction.com:8000", help="STAC API URL"
+        "--stac_api_url",
+        default="http://benchmark-stac.test.nextgenwaterprediction.com:8000",
+        help="STAC API URL",
     )
-    parser.add_argument("--collection", help="Optional: specific collection to search within")
+    parser.add_argument(
+        "--collection", help="Optional: specific collection to search within"
+    )
 
     args = parser.parse_args()
 
     # Setup logging
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
 
     # Create temp directory
     temp_dir = Path(args.temp_dir)
@@ -233,16 +309,20 @@ def main():
 
     # Extract STAC item geometries
     logging.info("Extracting STAC item geometries...")
-    item_files = extract_items(item_ids, temp_dir, args.stac_api_url, args.collection)
+    item_files = extract_items(
+        item_ids, temp_dir, args.stac_api_url, args.collection
+    )
 
     if not item_files:
         logging.error("No STAC item geometries extracted successfully")
         return 1
 
-    logging.info(f"Successfully extracted {len(item_files)} STAC item geometries")
+    logging.info(
+        f"Successfully extracted {len(item_files)} STAC item geometries"
+    )
 
     # Initialize fsspec S3 filesystem with fimc-data profile
-    s3_fs = fsspec.filesystem("s3", profile="fimc-data")
+    s3_fs = fsspec.filesystem("s3", profile="fimbucket")
 
     # Upload AOI files to S3
     s3_aoi_paths = {}
@@ -289,13 +369,17 @@ def main():
                 # Add 1 to account for the parameterized job template that's always running
                 if current_jobs < args.max_pipelines + 1:
                     break
-                wait_time = max(args.wait_seconds, 10)  # Minimum 10 seconds to avoid hammering the API
+                wait_time = max(
+                    args.wait_seconds, 10
+                )  # Minimum 10 seconds to avoid hammering the API
                 logging.info(
-                    f"Maximum pipeline limit ({args.max_pipelines}) reached. Current jobs: {current_jobs-1}. Waiting {wait_time} seconds..."  # current jobs is current chiled jobs so have to subtract 1 for parent
+                    f"Maximum pipeline limit ({args.max_pipelines}) reached. Current jobs: {current_jobs - 1}. Waiting {wait_time} seconds..."  # current jobs is current chiled jobs so have to subtract 1 for parent
                 )
                 time.sleep(wait_time)
 
-        logging.info(f"Submitting job for STAC item {item_id} (collection: {collection_id})")
+        logging.info(
+            f"Submitting job for STAC item {item_id} (collection: {collection_id})"
+        )
 
         try:
             job_id = submit_pipeline_job(
@@ -312,11 +396,15 @@ def main():
             )
 
             submitted_jobs.append((item_id, job_id))
-            logging.info(f"Successfully submitted job {job_id} for STAC item {item_id}")
+            logging.info(
+                f"Successfully submitted job {job_id} for STAC item {item_id}"
+            )
 
             # Wait between submissions if specified
             if args.wait_seconds > 0:
-                logging.info(f"Waiting {args.wait_seconds} seconds before next submission...")
+                logging.info(
+                    f"Waiting {args.wait_seconds} seconds before next submission..."
+                )
                 time.sleep(args.wait_seconds)
 
         except Exception as e:
@@ -346,9 +434,13 @@ def main():
         logging.info("\nMonitoring job completion...")
         while True:
             current_jobs = get_running_pipeline_jobs(nomad_client)
-            logging.info(f"Currently running pipeline jobs: {current_jobs-1}")  # don't count the parent job
+            logging.info(
+                f"Currently running pipeline jobs: {current_jobs - 1}"
+            )  # don't count the parent job
 
-            if current_jobs <= 1:  # Only the parameterized job template should remain
+            if (
+                current_jobs <= 1
+            ):  # Only the parameterized job template should remain
                 logging.info("All submitted jobs have completed!")
                 break
 

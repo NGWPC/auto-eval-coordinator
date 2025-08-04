@@ -66,7 +66,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
     
     # Define resolution-specific parameters
     batch_name="fim100_huc12_${resolution}m_${TIMESTAMP}"
-    output_root="s3://fimc-data/autoeval/batches/fim100_huc12_${resolution}_non_calibrated/"
+    output_root="s3://fimc-data/autoeval/batches/fim100_huc12_${resolution}m_non_calibrated/"
     hand_index_path="s3://fimc-data/autoeval/hand_output_indices/fim100_huc12_${resolution}m_index/"
     
     # loop over collections

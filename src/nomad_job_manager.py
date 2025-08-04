@@ -437,7 +437,6 @@ class NomadJobManager:
         await self._update_db_status(tracker)
 
         try:
-            await self._reconcile(tracker)
             await self._wait_for_allocation(tracker)
             await tracker.completion_event.wait()
 
@@ -574,10 +573,6 @@ class NomadJobManager:
                 else:
                     tracker.exit_code = task_state.get("ExitCode", 0)
                 return
-
-    async def _reconcile(self, tracker: JobTracker):
-        logger.debug(f"Reconciling status for new job {tracker.job_id}")
-        await self.poller.check_job_status(tracker, force_update=True)
 
     async def _wait_for_allocation(self, tracker: JobTracker):
         while tracker.allocation_id is None:
