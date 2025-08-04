@@ -1,14 +1,14 @@
 import asyncio
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-import aiohttp
 import nomad
 from tenacity import (
     retry,
@@ -132,223 +132,10 @@ class _NomadAPIClient:
         return await wrapped_call(self.client.job.get_allocations, job_id)
 
 
-class _EventMonitor:
-    """Monitors the Nomad event stream and dispatches events to the manager."""
-
-    def __init__(
-        self,
-        nomad_addr: str,
-        namespace: str,
-        token: Optional[str],
-        get_active_jobs_cb: Callable[[], Set[str]],
-        handle_event_cb: Callable[[Dict[str, Any]], Coroutine],
-        restart_event: asyncio.Event,
-        shutdown_event: asyncio.Event,
-        filter_by_jobs: bool,
-    ):
-        self.nomad_addr = nomad_addr.rstrip("/")
-        self.namespace = namespace
-        self.token = token
-        self._get_active_jobs = get_active_jobs_cb
-        self._handle_event = handle_event_cb
-        self._restart_event = restart_event
-        self._shutdown_event = shutdown_event
-        self.filter_by_jobs = filter_by_jobs
-
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.event_index = 0
-        self.last_event_time = time.time()
-        self.task: Optional[asyncio.Task] = None
-
-    def start(self):
-        if not self.task:
-            self.task = asyncio.create_task(self._monitor_loop())
-
-    async def stop(self):
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            self.task = None
-        if self.session and not self.session.closed:
-            await self.session.close()
-
-    async def _monitor_loop(self):
-        retry_count = 0
-        max_retries = 10
-        while not self._shutdown_event.is_set():
-            try:
-                self._restart_event.clear()
-                await self._process_event_stream()
-                retry_count = 0
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                retry_count += 1
-                logger.warning(
-                    f"Event stream error (attempt {retry_count}): {e}"
-                )
-                if retry_count >= max_retries:
-                    logger.error(
-                        "Event stream failed too many times, giving up."
-                    )
-                    break
-                wait_time = min(2**retry_count, 60)
-                await asyncio.sleep(wait_time)
-                if self.session and not self.session.closed:
-                    await self.session.close()
-                self.session = None
-
-    async def _process_event_stream(self):
-        if not self.session or self.session.closed:
-            timeout = aiohttp.ClientTimeout(
-                total=None, connect=30, sock_read=120
-            )
-            self.session = aiohttp.ClientSession(timeout=timeout)
-
-        params = {"index": self.event_index, "namespace": self.namespace}
-        active_jobs = self._get_active_jobs()
-        if self.filter_by_jobs and active_jobs:
-            params["jobs"] = ",".join(active_jobs)
-
-        url = f"{self.nomad_addr}/v1/event/stream"
-        headers = {"X-Nomad-Token": self.token} if self.token else {}
-
-        async with self.session.get(
-            url, params=params, headers=headers
-        ) as response:
-            response.raise_for_status()
-            async for chunk in response.content.iter_chunked(8192):
-                if (
-                    self._shutdown_event.is_set()
-                    or self._restart_event.is_set()
-                ):
-                    logger.info("Restarting event stream due to signal.")
-                    break
-
-                self.last_event_time = time.time()
-                for raw_line in chunk.split(b"\n"):
-                    if not raw_line.strip():
-                        continue
-                    try:
-                        data = json.loads(raw_line.decode("utf-8"))
-                        if "Index" in data:
-                            self.event_index = data["Index"]
-                        for event in data.get("Events", []):
-                            await self._handle_event(event)
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            f"Failed to decode JSON from event stream: {raw_line!r}"
-                        )
-
-
-class _PollingFallback:
-    """Periodically polls Nomad to catch missed updates and handle stale jobs."""
-
-    def __init__(
-        self,
-        api_client: _NomadAPIClient,
-        get_active_trackers: Callable[[], List[JobTracker]],
-        update_tracker_cb: Callable[[JobTracker, Dict[str, Any]], Coroutine],
-        shutdown_event: asyncio.Event,
-        poll_interval: int,
-        escalation_timeout: int,
-    ):
-        self.api = api_client
-        self._get_active_trackers = get_active_trackers
-        self._update_tracker = update_tracker_cb
-        self._shutdown_event = shutdown_event
-        self.poll_interval = poll_interval
-        self.escalation_timeout = escalation_timeout
-        self.task: Optional[asyncio.Task] = None
-
-    def start(self):
-        if not self.task:
-            self.task = asyncio.create_task(self._poll_loop())
-
-    async def stop(self):
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            self.task = None
-
-    async def _poll_loop(self):
-        while not self._shutdown_event.is_set():
-            await asyncio.sleep(self.poll_interval)
-            now = time.time()
-            for tracker in self._get_active_trackers():
-                if tracker.completion_event.is_set():
-                    continue
-                is_stale = (
-                    now - tracker.dispatch_time
-                ) > self.escalation_timeout
-                if is_stale:
-                    logger.warning(
-                        f"Job {tracker.job_id} is stale, forcing status poll."
-                    )
-                await self.check_job_status(tracker, force_update=is_stale)
-
-    async def check_job_status(
-        self, tracker: JobTracker, force_update: bool = False
-    ):
-        """Polls a single job and updates its tracker if necessary."""
-        try:
-            allocations = await self.api.get_allocations(tracker.job_id)
-            if not allocations:
-                if force_update:
-                    logger.warning(
-                        f"No allocations found for stale job {tracker.job_id}, marking as LOST."
-                    )
-                    tracker.status = JobStatus.LOST
-                    tracker.error = Exception(
-                        "Job lost: No allocations found after escalation timeout."
-                    )
-                    tracker.completion_event.set()
-                    await self._update_tracker(
-                        tracker, {}
-                    )  # Update DB with final state
-                return
-
-            latest_alloc = max(
-                allocations, key=lambda a: a.get("CreateTime", 0)
-            )
-            await self._update_tracker(tracker, latest_alloc)
-
-        except (
-            nomad.api.exceptions.URLNotFoundNomadException,
-            nomad.api.exceptions.URLNotAuthorizedNomadException,
-            nomad.api.exceptions.TimeoutNomadException,
-        ) as e:
-            if force_update:
-                logger.error(
-                    f"Job {tracker.job_id} encountered a terminal API error after escalation timeout "
-                    f"and will be marked as LOST. Error: {e}"
-                )
-                tracker.status = JobStatus.LOST
-                tracker.error = e
-                tracker.completion_event.set()
-                await self._update_tracker(
-                    tracker, {}
-                )  # Update DB with final state
-            else:
-                logger.warning(
-                    f"[Polling] Transient API error for {tracker.job_id}: {e}"
-                )
-        except Exception as e:
-            logger.error(
-                f"[Polling] Unexpected error while checking status for {tracker.job_id}: {e}"
-            )
-
-
 class NomadJobManager:
     """
-    Manages the lifecycle of parameterized Nomad jobs using a combination of
-    event streaming and periodic polling.
+    Manages the lifecycle of parameterized Nomad jobs using a polling-based
+    strategy with exponential backoff.
     """
 
     def __init__(
@@ -358,16 +145,11 @@ class NomadJobManager:
         token: Optional[str] = None,
         log_db: Optional[Any] = None,
         max_concurrent_dispatch: int = 10,
-        polling_interval: int = 30,
-        polling_escalation_timeout: int = 1800,
-        filter_events_by_jobs: bool = True,
-        job_list_change_threshold: int = 5,
     ):
         self.nomad_addr = nomad_addr
         self.namespace = namespace
         self.token = token
         self.log_db = log_db
-        self.job_list_change_threshold = job_list_change_threshold
 
         parsed = urlparse(nomad_addr)
         nomad_client = nomad.Nomad(
@@ -378,42 +160,19 @@ class NomadJobManager:
             namespace=namespace,
         )
         self.api = _NomadAPIClient(nomad_client, max_concurrent_dispatch)
-
         self._active_jobs: Dict[str, JobTracker] = {}
-        self._stream_job_list: Set[str] = set()
         self._shutdown_event = asyncio.Event()
-        self._stream_restart_event = asyncio.Event()
-
-        self.event_monitor = _EventMonitor(
-            nomad_addr=nomad_addr,
-            namespace=namespace,
-            token=token,
-            get_active_jobs_cb=lambda: set(self._active_jobs.keys()),
-            handle_event_cb=self._handle_allocation_event,
-            restart_event=self._stream_restart_event,
-            shutdown_event=self._shutdown_event,
-            filter_by_jobs=filter_events_by_jobs,
-        )
-        self.poller = _PollingFallback(
-            api_client=self.api,
-            get_active_trackers=lambda: list(self._active_jobs.values()),
-            update_tracker_cb=self._update_tracker_from_allocation,
-            shutdown_event=self._shutdown_event,
-            poll_interval=polling_interval,
-            escalation_timeout=polling_escalation_timeout,
-        )
 
     async def start(self):
-        logger.info("Starting NomadJobManager...")
-        self.event_monitor.start()
-        self.poller.start()
+        """Starts the job manager (no background tasks in this version)."""
+        logger.info("Starting NomadJobManager (polling-based).")
+        # No background tasks to start in a pure polling model
 
     async def stop(self):
-        logger.info("Stopping NomadJobManager...")
+        """Stops the job manager."""
+        logger.info("Stopping NomadJobManager.")
         self._shutdown_event.set()
-        await self.event_monitor.stop()
-        await self.poller.stop()
-        logger.info("NomadJobManager stopped.")
+        # No background tasks to stop
 
     async def dispatch_and_track(
         self,
@@ -421,6 +180,10 @@ class NomadJobManager:
         prefix: str,
         meta: Optional[Dict[str, str]] = None,
     ) -> Tuple[str, int]:
+        """
+        Dispatches a job and polls its status until completion using
+        an exponential backoff strategy.
+        """
         try:
             job_id = await self.api.dispatch_job(job_name, prefix, meta)
         except Exception as e:
@@ -433,12 +196,23 @@ class NomadJobManager:
             job_id=job_id, task_name=job_name, stage=(meta or {}).get("stage")
         )
         self._active_jobs[job_id] = tracker
-        await self._maybe_restart_event_stream()
         await self._update_db_status(tracker)
 
         try:
-            await self._wait_for_allocation(tracker)
-            await tracker.completion_event.wait()
+            # Polling loop with exponential backoff
+            poll_delay = 1.0  # Start with a 1-second delay
+            backoff_factor = 1.5
+            jitter_factor = 0.25  # Apply up to 25% jitter
+            max_poll_delay = 120.0  # Max delay of 2 minutes
+
+            while not tracker.completion_event.is_set():
+                jitter = poll_delay * jitter_factor * random.uniform(-1, 1)
+                await asyncio.sleep(max(0, poll_delay + jitter))
+
+                await self._poll_job_and_update_tracker(tracker)
+
+                # Increase delay for the next poll
+                poll_delay = min(poll_delay * backoff_factor, max_poll_delay)
 
             if tracker.error:
                 raise JobDispatchError(
@@ -451,9 +225,49 @@ class NomadJobManager:
             return job_id, tracker.exit_code or 0
         finally:
             self._active_jobs.pop(job_id, None)
-            await self._maybe_restart_event_stream()
+
+    async def _poll_job_and_update_tracker(self, tracker: JobTracker):
+        """Polls a single job and updates its tracker if the status has changed."""
+        try:
+            allocations = await self.api.get_allocations(tracker.job_id)
+
+            time_since_dispatch = time.time() - tracker.dispatch_time
+            if not allocations and time_since_dispatch > 300:  # 5 mins
+                logger.warning(
+                    f"No allocations found for job {tracker.job_id} after 5 minutes, marking as LOST."
+                )
+                tracker.status = JobStatus.LOST
+                tracker.error = Exception(
+                    "Job lost: No allocations found after timeout."
+                )
+                tracker.completion_event.set()
+                await self._update_db_status(tracker)
+                return
+
+            if not allocations:
+                logger.debug(f"Polling {tracker.job_id}: No allocations yet.")
+                return
+
+            latest_alloc = max(
+                allocations, key=lambda a: a.get("CreateTime", 0)
+            )
+            await self._update_tracker_from_allocation(tracker, latest_alloc)
+
+        except nomad.api.exceptions.URLNotFoundNomadException as e:
+            logger.error(
+                f"Polling failed for job {tracker.job_id}, it may have been purged. Marking as LOST. Error: {e}"
+            )
+            tracker.status = JobStatus.LOST
+            tracker.error = e
+            tracker.completion_event.set()
+            await self._update_db_status(tracker)
+        except Exception as e:
+            logger.warning(
+                f"Unexpected error while polling for job {tracker.job_id}: {e}"
+            )
 
     async def get_job_status(self, job_id: str) -> Dict[str, Any]:
+        """Gets the current status of a job, from memory or by polling Nomad."""
         if job_id in self._active_jobs:
             t = self._active_jobs[job_id]
             return {
@@ -475,26 +289,10 @@ class NomadJobManager:
                 f"Job {job_id} not found or API error: {e}"
             ) from e
 
-    async def _handle_allocation_event(self, event: Dict[str, Any]):
-        if event.get("Topic") != "Allocation":
-            return
-        try:
-            allocation = event["Payload"]["Allocation"]
-            job_id = allocation.get("JobID")
-            if not job_id or job_id not in self._active_jobs:
-                return
-            await self._update_tracker_from_allocation(
-                self._active_jobs[job_id], allocation, from_event=True
-            )
-        except KeyError:
-            logger.warning(f"Could not parse allocation from event payload.")
-
     async def _update_tracker_from_allocation(
-        self,
-        tracker: JobTracker,
-        allocation: Dict[str, Any],
-        from_event: bool = False,
+        self, tracker: JobTracker, allocation: Dict[str, Any]
     ):
+        """Updates a tracker's state based on a Nomad allocation object."""
         if tracker.completion_event.is_set():
             return
 
@@ -502,19 +300,12 @@ class NomadJobManager:
         client_status = allocation.get("ClientStatus", "").lower()
         new_status = NOMAD_STATUS_MAP.get(client_status, JobStatus.UNKNOWN)
 
-        # Handle updates from the poller for lost jobs
-        if not allocation and tracker.status == JobStatus.LOST:
-            await self._update_db_status(tracker)
-            return
-
         if new_status == old_status:
-            return
+            return  # No change
 
-        source = "event" if from_event else "polling"
         logger.info(
-            f"Job {tracker.job_id} status change via {source}: {old_status.name} -> {new_status.name}"
+            f"Job {tracker.job_id} status change via polling: {old_status.name} -> {new_status.name}"
         )
-
         tracker.status = new_status
         tracker.timestamp = datetime.now(timezone.utc)
         if not tracker.allocation_id:
@@ -531,7 +322,7 @@ class NomadJobManager:
         if is_terminal:
             self._extract_final_state(tracker, allocation)
             logger.info(
-                f"Job {tracker.job_id} completed via {source} with status JobStatus.{new_status.name} "
+                f"Job {tracker.job_id} completed with status JobStatus.{new_status.name} "
                 f"(exit_code: {tracker.exit_code})"
             )
             tracker.completion_event.set()
@@ -541,14 +332,15 @@ class NomadJobManager:
     def _extract_final_state(
         self, tracker: JobTracker, allocation: Dict[str, Any]
     ):
+        """Extracts the exit code and error message from a terminal allocation."""
         task_states = allocation.get("TaskStates", {})
         for task_name, task_state in task_states.items():
             if task_state.get("FinishedAt"):
                 if tracker.status == JobStatus.FAILED:
                     tracker.exit_code = task_state.get("ExitCode", 1)
                     failure_details = []
-                    events = task_state.get("Events", [])
-                    for event in reversed(events):
+                    # Search for a meaningful event message
+                    for event in reversed(task_state.get("Events", [])):
                         if event.get("Type") in [
                             "Terminated",
                             "Task Failed",
@@ -562,9 +354,6 @@ class NomadJobManager:
                                 f"Task '{task_name}' failed: {reason}"
                             )
                             break
-                    logger.info(
-                        f"Job {tracker.job_id} failure details: {'; '.join(failure_details)}"
-                    )
                     if not failure_details:
                         failure_details.append(
                             f"Task '{task_name}' failed with exit code {tracker.exit_code}."
@@ -574,38 +363,15 @@ class NomadJobManager:
                     tracker.exit_code = task_state.get("ExitCode", 0)
                 return
 
-    async def _wait_for_allocation(self, tracker: JobTracker):
-        while tracker.allocation_id is None:
-            if tracker.completion_event.is_set():
-                raise JobDispatchError(
-                    f"Job {tracker.job_id} failed before allocation.",
-                    job_id=tracker.job_id,
-                    exit_code=tracker.exit_code,
-                    original_error=tracker.error,
-                )
-            await asyncio.sleep(0.5)
-
-    async def _maybe_restart_event_stream(self):
-        if not self.event_monitor.filter_by_jobs:
-            return
-        current_jobs = set(self._active_jobs.keys())
-        if (
-            len(current_jobs.symmetric_difference(self._stream_job_list))
-            >= self.job_list_change_threshold
-        ):
-            logger.info(
-                f"Job list changed significantly, triggering event stream restart."
-            )
-            self._stream_job_list = current_jobs
-            self._stream_restart_event.set()
-
     async def _update_db_status(self, tracker: JobTracker):
+        """Updates an external database with the latest job status."""
         logger.info(
             f"Job {tracker.job_id} status updated: JobStatus.{tracker.status.name}"
         )
         if not self.log_db:
             return
         try:
+            # This is an example; replace with your actual database call
             await self.log_db.update_job_status(
                 job_id=tracker.job_id,
                 status=tracker.status.value,
