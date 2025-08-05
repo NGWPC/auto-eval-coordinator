@@ -1,7 +1,6 @@
 job "fim_mosaicker" {
   datacenters = ["dc1"] 
   type        = "batch"
-  priority    = 80
 
   constraint {
     attribute = "${node.class}"

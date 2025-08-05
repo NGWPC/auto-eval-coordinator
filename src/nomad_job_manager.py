@@ -203,7 +203,7 @@ class NomadJobManager:
             poll_delay = 1.0  # Start with a 1-second delay
             backoff_factor = 1.5
             jitter_factor = 0.25  # Apply up to 25% jitter
-            max_poll_delay = 120.0  # Max delay of 2 minutes
+            max_poll_delay = 30.0  # Max delay of 30s
 
             while not tracker.completion_event.is_set():
                 jitter = poll_delay * jitter_factor * random.uniform(-1, 1)
@@ -304,7 +304,7 @@ class NomadJobManager:
             return  # No change
 
         logger.info(
-            f"Job {tracker.job_id} status change via polling: {old_status.name} -> {new_status.name}"
+            f"Job {tracker.job_id} status change: {old_status.name} -> {new_status.name}"
         )
         tracker.status = new_status
         tracker.timestamp = datetime.now(timezone.utc)
@@ -371,7 +371,6 @@ class NomadJobManager:
         if not self.log_db:
             return
         try:
-            # This is an example; replace with your actual database call
             await self.log_db.update_job_status(
                 job_id=tracker.job_id,
                 status=tracker.status.value,
