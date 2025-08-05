@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from .cloudwatch_analyzer import CloudWatchAnalyzer
 from .html_generator import HTMLGenerator
-from .models import DebugConfig, FailedJobInfo
+from .models import DebugConfig, FailedJobInfo, UniqueErrorInfo
 from .report_generator import ReportGenerator
 from .s3_analyzer import S3MetricsAnalyzer
 from .summary_analyzer import SummaryAnalyzer
@@ -43,6 +43,8 @@ class BatchRunAnalyzer:
         unique_errors = []
         failed_pipelines = []
         missing_aois = []
+        unhandled_exceptions = []
+        unique_unhandled_exceptions = []
         comprehensive_results = {}
         
         if self.config.scrape_bucket:
@@ -54,6 +56,7 @@ class BatchRunAnalyzer:
                 "failed_jobs_count": 0,
                 "failed_pipelines_count": 0,
                 "unhandled_exceptions_count": 0,
+                "unique_unhandled_exceptions_count": 0,
                 "submitted_pipelines_count": 0,
                 "missing_aois_count": 0,
                 "missing_aois": [],
@@ -124,14 +127,81 @@ class BatchRunAnalyzer:
                     )
                 )
 
+            # Extract unhandled exceptions data
+            unhandled_exceptions_by_stream = comprehensive_results.get("unhandled_exceptions_by_stream", {})
+            unhandled_exceptions = []
+            
+            # Create FailedJobInfo objects for jobs with unhandled exceptions
+            for job in application_failures + infrastructure_issues:
+                job_stream = job["job_log_stream"]
+                exception_messages = unhandled_exceptions_by_stream.get(job_stream, [])
+                
+                if exception_messages:  # Only include jobs that actually have unhandled exceptions
+                    unhandled_exceptions.append(
+                        FailedJobInfo(
+                            pipeline_log_stream=job["pipeline_log_stream"],
+                            job_log_stream=job_stream,
+                            error_messages=exception_messages,
+                            timestamp=job.get("timestamp"),
+                            job_status=job["job_status"]
+                        )
+                    )
+
             # Get unique errors and failed pipelines from results
             unique_errors = comprehensive_results.get("unique_errors", [])
             failed_pipelines = comprehensive_results.get("failed_pipelines", [])
+            
+            # Create unique unhandled exception patterns analysis
+            unique_unhandled_exceptions = []
+            if unhandled_exceptions:
+                from collections import defaultdict
+                from .error_patterns import ErrorPatternExtractor
+                
+                error_extractor = ErrorPatternExtractor()
+                exception_patterns = defaultdict(list)
+                
+                # Group unhandled exceptions by pattern
+                for exception_job in unhandled_exceptions:
+                    for message in exception_job.error_messages:
+                        pattern, error_type = error_extractor.extract_raw_error_pattern(message)
+                        
+                        exception_patterns[pattern].append({
+                            "job_stream": exception_job.job_log_stream,
+                            "pipeline_stream": exception_job.pipeline_log_stream,
+                            "timestamp": exception_job.timestamp,
+                            "raw_message": message,
+                            "error_type": error_type,
+                            "job_status": exception_job.job_status,
+                        })
+                
+                # Create UniqueErrorInfo objects for each pattern
+                for pattern, occurrences in exception_patterns.items():
+                    # Sort by timestamp to get first occurrence
+                    occurrences.sort(key=lambda x: x["timestamp"] or "")
+                    first_occurrence = occurrences[0]
+                    
+                    unique_unhandled_exceptions.append(
+                        UniqueErrorInfo(
+                            error_pattern=pattern,
+                            error_type=first_occurrence["error_type"],
+                            occurrence_count=len(occurrences),
+                            first_occurrence_timestamp=first_occurrence["timestamp"],
+                            first_occurrence_job_stream=first_occurrence["job_stream"],
+                            first_occurrence_pipeline_stream=first_occurrence["pipeline_stream"],
+                            sample_raw_message=first_occurrence["raw_message"],
+                            affected_job_streams=[o["job_stream"] for o in occurrences],
+                        )
+                    )
+                
+                # Sort by occurrence count
+                unique_unhandled_exceptions.sort(key=lambda x: x.occurrence_count, reverse=True)
             
             # Update counts in results
             results["failed_jobs_count"] = len(failed_jobs)
             results["failed_pipelines_count"] = len(failed_pipelines)
             results["unique_error_patterns_count"] = len(unique_errors)
+            results["unhandled_exceptions_count"] = len(unhandled_exceptions)
+            results["unique_unhandled_exceptions_count"] = len(unique_unhandled_exceptions)
             results["submitted_pipelines_count"] = comprehensive_results.get("summary", {}).get("total_jobs", 0)
 
             # Generate reports
@@ -141,6 +211,15 @@ class BatchRunAnalyzer:
 
             if unique_errors:
                 report_file = self.report_generator.generate_unique_errors_report(unique_errors)
+                results["reports_generated"].append(report_file)
+                
+            # Generate unhandled exceptions reports
+            if unhandled_exceptions:
+                report_file = self.report_generator.generate_unhandled_exceptions_report(unhandled_exceptions)
+                results["reports_generated"].append(report_file)
+                
+            if unique_unhandled_exceptions:
+                report_file = self.report_generator.generate_unique_exceptions_report(unique_unhandled_exceptions)
                 results["reports_generated"].append(report_file)
 
             # Generate missing AOIs report
@@ -204,10 +283,10 @@ class BatchRunAnalyzer:
                 html_file = self.html_generator.generate_cloudwatch_dashboard(
                     results,
                     failed_jobs,
-                    [],  # unhandled_exceptions (empty for now)
+                    unhandled_exceptions,
                     missing_aois if missing_aois else None,
                     unique_errors,
-                    [],  # unique_unhandled_exceptions (empty for now)
+                    unique_unhandled_exceptions,
                     failed_pipelines,
                 )
             results["reports_generated"].append(html_file)

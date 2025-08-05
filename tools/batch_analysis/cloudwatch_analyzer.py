@@ -292,13 +292,22 @@ class CloudWatchAnalyzer:
 
     def get_errors_for_failed_jobs_bulk(
         self, failed_job_streams: List[str]
-    ) -> Dict[str, List[str]]:
+    ) -> Dict[str, Any]:
         """
         Retrieve errors for multiple failed job streams in bulk.
-        Returns a dictionary mapping job stream to error messages.
+        Returns a dictionary with structured error information:
+        {
+            'all_errors': {job_stream: [error_messages]},
+            'json_errors': {job_stream: [json_error_messages]},
+            'unhandled_exceptions': {job_stream: [exception_messages]}
+        }
         """
         if not failed_job_streams:
-            return {}
+            return {
+                "all_errors": {},
+                "json_errors": {},
+                "unhandled_exceptions": {},
+            }
 
         logger.info(
             f"Retrieving errors for {len(failed_job_streams)} failed jobs in bulk..."
@@ -307,6 +316,8 @@ class CloudWatchAnalyzer:
         # Process in chunks to avoid query size limits
         chunk_size = 25
         all_errors = {}
+        json_errors = {}
+        unhandled_exceptions = {}
 
         for i in range(0, len(failed_job_streams), chunk_size):
             chunk = failed_job_streams[i : i + chunk_size]
@@ -339,27 +350,58 @@ class CloudWatchAnalyzer:
                 self.config.job_log_group, unhandled_errors_query
             )
 
-            # Combine and process results
-            for result in json_results + unhandled_results:
+            # Process JSON errors separately
+            for result in json_results:
                 job_stream = self._get_field_value(result, "@logStream")
                 message = self._get_field_value(result, "@message")
 
                 if message and message != "Parse Error":
+                    # Add to all_errors
                     if job_stream not in all_errors:
                         all_errors[job_stream] = []
-                    if (
-                        message not in all_errors[job_stream]
-                    ):  # Avoid duplicates
+                    if message not in all_errors[job_stream]:
                         all_errors[job_stream].append(message)
 
-        # Ensure all requested streams have an entry
+                    # Add to json_errors
+                    if job_stream not in json_errors:
+                        json_errors[job_stream] = []
+                    if message not in json_errors[job_stream]:
+                        json_errors[job_stream].append(message)
+
+            # Process unhandled exceptions separately
+            for result in unhandled_results:
+                job_stream = self._get_field_value(result, "@logStream")
+                message = self._get_field_value(result, "@message")
+
+                if message and message != "Parse Error":
+                    # Add to all_errors
+                    if job_stream not in all_errors:
+                        all_errors[job_stream] = []
+                    if message not in all_errors[job_stream]:
+                        all_errors[job_stream].append(message)
+
+                    # Add to unhandled_exceptions
+                    if job_stream not in unhandled_exceptions:
+                        unhandled_exceptions[job_stream] = []
+                    if message not in unhandled_exceptions[job_stream]:
+                        unhandled_exceptions[job_stream].append(message)
+
+        # Ensure all requested streams have an entry in all error collections
         for stream in failed_job_streams:
             if stream not in all_errors:
                 all_errors[stream] = [
                     "No error messages found in job log stream"
                 ]
+            if stream not in json_errors:
+                json_errors[stream] = []
+            if stream not in unhandled_exceptions:
+                unhandled_exceptions[stream] = []
 
-        return all_errors
+        return {
+            "all_errors": all_errors,
+            "json_errors": json_errors,
+            "unhandled_exceptions": unhandled_exceptions,
+        }
 
     def find_all_jobs_consolidated(self) -> Dict[str, Any]:
         """
@@ -383,7 +425,6 @@ class CloudWatchAnalyzer:
         | filter @logStream like {stream_filter}
         | filter @message like /JobStatus\\./
         | sort @timestamp desc
-        | limit 100 #REMOVE after working!
         """
 
         results = self.run_query(
@@ -559,17 +600,22 @@ class CloudWatchAnalyzer:
         status_groups = job_analysis["status_groups"]
         summary = job_analysis["summary"]
 
-        # Step 2: Get errors for all failed/lost jobs in bulk
-        failed_jobs = (
-            status_groups["application_failures"]
-            + status_groups["infrastructure_issues"]
-        )
+        # Step 2: Get errors for failed jobs only (exclude LOST jobs as they are infrastructure issues)
+        failed_jobs = status_groups[
+            "application_failures"
+        ]  # Only FAILED jobs, not LOST
         failed_job_streams = [job["job_log_stream"] for job in failed_jobs]
 
+        error_results = {}
         error_messages_by_stream = {}
+        unhandled_exceptions_by_stream = {}
         if failed_job_streams:
-            error_messages_by_stream = self.get_errors_for_failed_jobs_bulk(
+            error_results = self.get_errors_for_failed_jobs_bulk(
                 failed_job_streams
+            )
+            error_messages_by_stream = error_results.get("all_errors", {})
+            unhandled_exceptions_by_stream = error_results.get(
+                "unhandled_exceptions", {}
             )
 
         # Step 3: Analyze error patterns and create unique error analysis
@@ -636,14 +682,14 @@ class CloudWatchAnalyzer:
         # Step 5: Create actionable insights
         action_items = []
 
-        # High-priority: Infrastructure issues
+        # High-priority: Infrastructure issues (LOST jobs)
         if len(status_groups["infrastructure_issues"]) > 0:
             action_items.append(
                 {
                     "priority": "HIGH",
                     "category": "Infrastructure",
-                    "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues",
-                    "recommendation": "Check Nomad cluster health, node availability, and timeout settings",
+                    "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues (no error analysis performed)",
+                    "recommendation": "Check Nomad cluster health, node availability, and timeout settings. These jobs likely completed successfully but were marked as LOST due to infrastructure timing issues.",
                     "affected_jobs": len(
                         status_groups["infrastructure_issues"]
                     ),
@@ -675,9 +721,18 @@ class CloudWatchAnalyzer:
                 }
             )
 
+        # Count unhandled exceptions
+        unhandled_exceptions_count = sum(
+            len(exceptions)
+            for exceptions in unhandled_exceptions_by_stream.values()
+        )
+
         logger.info(
             f"Comprehensive analysis complete: {summary['total_jobs']} jobs analyzed, "
+            f"{len(status_groups['application_failures'])} FAILED jobs investigated for errors, "
+            f"{len(status_groups['infrastructure_issues'])} LOST jobs categorized as infrastructure issues, "
             f"{len(unique_errors)} unique error patterns found, "
+            f"{unhandled_exceptions_count} unhandled exceptions found, "
             f"{len(action_items)} action items identified"
         )
 
@@ -690,4 +745,6 @@ class CloudWatchAnalyzer:
             "submitted_pipelines": submitted_pipelines,
             "action_items": action_items,
             "detailed_errors": error_messages_by_stream,
+            "unhandled_exceptions_count": unhandled_exceptions_count,
+            "unhandled_exceptions_by_stream": unhandled_exceptions_by_stream,
         }
