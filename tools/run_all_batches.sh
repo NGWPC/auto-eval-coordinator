@@ -107,27 +107,12 @@ for resolution in "${RESOLUTIONS[@]}"; do
             continue
         fi
         
-        # Refresh AWS credentials before generating report
-        echo "--- Refreshing AWS Credentials for $collection report ---"
-        aws sso login --profile AWSPowerUserAccess-591210920133
+        echo "Running update_aws_creds.sh..."
+        update_aws_creds.sh cloudwatch
         if [[ $? -ne 0 ]]; then
-            echo "Error: AWS SSO login failed"
-            read -p "Continue anyway? (y/n): " -n 1 -r
-            echo ""
-            [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+            echo "Warning: update_aws_creds.sh failed"
         fi
         
-        if [[ -f "./update_aws_creds.sh" ]]; then
-            echo "Running update_aws_creds.sh..."
-            ./update_aws_creds.sh
-            if [[ $? -ne 0 ]]; then
-                echo "Warning: update_aws_creds.sh failed"
-            fi
-        else
-            echo "Warning: update_aws_creds.sh not found, skipping"
-        fi
-        
-        # Generate report for this collection before purging
         echo "--- Generating Report for $collection at ${resolution}m ---"
         collection_reports_dir="$REPO_ROOT/reports/${batch_name}_${collection}"
         collection_report_cmd="python tools/batch_run_reports.py --batch_name $batch_name --output_dir $collection_reports_dir --pipeline_log_group /aws/ec2/nomad-client-linux-test --job_log_group /aws/ec2/nomad-client-linux-test --s3_output_root $output_root --aoi_list $item_list_file --collection $collection --html"
@@ -143,7 +128,6 @@ for resolution in "${RESOLUTIONS[@]}"; do
             fi
         fi
         
-        # Purge dispatch jobs after each collection
         echo "--- Purging Dispatch Jobs after $collection ---"
         purge_cmd="python tools/purge_dispatch_jobs.py"
         
@@ -158,7 +142,6 @@ for resolution in "${RESOLUTIONS[@]}"; do
         echo ""
     done
     
-    # After processing all collections for this resolution, run make_master_metrics
     echo "--- Creating Master Metrics for ${resolution}m ---"
     master_metrics_cmd="python tools/make_master_metrics.py $output_root --hand-version \"fim100_huc12\" --resolution \"$resolution\""
     
