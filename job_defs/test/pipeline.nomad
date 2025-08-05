@@ -30,10 +30,11 @@ job "pipeline" {
       unlimited = false
     }
 
+    # This restart block is configured like this to spread out the load on cloudwatch when it is under stress
     restart {
-      attempts = 1        # Try again once on the same node. Don't actually want to attempt a failing pipeline too many times. Want to be more stubborn with restart attempts at the job level.
-      interval = "10m"    # Within a 10 minute window
-      delay    = "45s"    # Wait 45s between attempts
+      attempts = 5        # Try N times on the same node
+      interval = "20m"    # Within an N minute window. Needs to be slightly longer than attempts * delay
+      delay    = "2m"    # Wait 2m between attempts
       mode     = "fail"   # Fail after attempts exhausted
     }
 
