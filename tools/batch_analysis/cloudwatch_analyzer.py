@@ -618,6 +618,18 @@ class CloudWatchAnalyzer:
                 "unhandled_exceptions", {}
             )
 
+        # Step 2.1: Analyze terminal status jobs (STOPPED, CANCELLED, LOST) for detailed failure information
+        terminal_jobs = (
+            status_groups["infrastructure_issues"] +  # LOST jobs
+            status_groups["intentional_stops"]  # STOPPED, CANCELLED jobs
+        )
+        terminal_status_details = {}
+        if terminal_jobs:
+            terminal_status_details = self.get_terminal_status_details(terminal_jobs)
+
+        # Step 2.2: Extract nomad failure information from pipeline logs
+        nomad_failures = self.extract_nomad_failures()
+
         # Step 3: Analyze error patterns and create unique error analysis
         error_patterns = defaultdict(list)
 
@@ -682,17 +694,34 @@ class CloudWatchAnalyzer:
         # Step 5: Create actionable insights
         action_items = []
 
-        # High-priority: Infrastructure issues (LOST jobs)
+        # High-priority: Driver Failures (specific nomad issues)
+        if nomad_failures["summary"]["total_driver_failures"] > 0:
+            action_items.append(
+                {
+                    "priority": "HIGH",
+                    "category": "Nomad Driver Failure",
+                    "issue": f"{nomad_failures['summary']['total_driver_failures']} driver failures detected in pipeline logs",
+                    "recommendation": "Investigate driver failures which indicate issues with job execution environment, resource allocation, or container runtime problems.",
+                    "affected_jobs": nomad_failures["summary"]["total_driver_failures"],
+                    "details": f"Affected job count: {len(set([f['job_id'] for f in nomad_failures['driver_failures']]))}",
+                }
+            )
+
+        # High-priority: Infrastructure issues (LOST jobs) with enhanced analysis
         if len(status_groups["infrastructure_issues"]) > 0:
+            lost_with_driver_failures = sum(1 for job in status_groups["infrastructure_issues"] 
+                                          if terminal_status_details.get(job["job_log_stream"], {}).get("failure_type") == "driver_failure")
+            lost_with_timeouts = sum(1 for job in status_groups["infrastructure_issues"] 
+                                   if terminal_status_details.get(job["job_log_stream"], {}).get("failure_type") == "infrastructure_timeout")
+            
             action_items.append(
                 {
                     "priority": "HIGH",
                     "category": "Infrastructure",
-                    "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues (no error analysis performed)",
-                    "recommendation": "Check Nomad cluster health, node availability, and timeout settings. These jobs likely completed successfully but were marked as LOST due to infrastructure timing issues.",
-                    "affected_jobs": len(
-                        status_groups["infrastructure_issues"]
-                    ),
+                    "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues",
+                    "recommendation": "Check Nomad cluster health, node availability, and timeout settings. Review driver failures and timeout patterns for root cause analysis.",
+                    "affected_jobs": len(status_groups["infrastructure_issues"]),
+                    "details": f"Driver failures: {lost_with_driver_failures}, Timeouts: {lost_with_timeouts}, Other: {len(status_groups['infrastructure_issues']) - lost_with_driver_failures - lost_with_timeouts}",
                 }
             )
 
@@ -708,6 +737,26 @@ class CloudWatchAnalyzer:
                         "affected_jobs": error.occurrence_count,
                     }
                 )
+
+        # Medium-priority: Intentional stops (STOPPED, CANCELLED) with analysis
+        if len(status_groups["intentional_stops"]) > 0:
+            stopped_count = len([job for job in status_groups["intentional_stops"] if job["job_status"] == "STOPPED"])
+            cancelled_count = len([job for job in status_groups["intentional_stops"] if job["job_status"] == "CANCELLED"])
+            
+            # Check if we have detailed reasons for these jobs
+            with_reasons = sum(1 for job in status_groups["intentional_stops"] 
+                             if terminal_status_details.get(job["job_log_stream"], {}).get("failure_reason", "Unknown") != "Unknown reason")
+            
+            action_items.append(
+                {
+                    "priority": "MEDIUM",
+                    "category": "Intentional Job Termination",
+                    "issue": f"{len(status_groups['intentional_stops'])} jobs were stopped or cancelled",
+                    "recommendation": "Review reasons for intentional job termination. Check if these represent expected behavior or indicate issues requiring intervention.",
+                    "affected_jobs": len(status_groups["intentional_stops"]),
+                    "details": f"Stopped: {stopped_count}, Cancelled: {cancelled_count}, With detailed reasons: {with_reasons}",
+                }
+            )
 
         # Medium-priority: Failed pipelines
         if len(failed_pipelines) > 0:
@@ -747,4 +796,369 @@ class CloudWatchAnalyzer:
             "detailed_errors": error_messages_by_stream,
             "unhandled_exceptions_count": unhandled_exceptions_count,
             "unhandled_exceptions_by_stream": unhandled_exceptions_by_stream,
+            "terminal_status_details": terminal_status_details,
+            "nomad_failures": nomad_failures,
         }
+
+    def get_terminal_status_details(self, jobs: List[Dict]) -> Dict[str, Any]:
+        """
+        Extract detailed information from both job and pipeline logs for terminal status jobs.
+        Covers STOPPED, CANCELLED, and LOST jobs with context from logs.
+        
+        Args:
+            jobs: List of job dictionaries with terminal statuses
+            
+        Returns:
+            Dictionary with detailed information for each job including failure reasons
+        """
+        if not jobs:
+            return {}
+            
+        logger.info(f"Extracting terminal status details for {len(jobs)} jobs...")
+        
+        terminal_details = {}
+        
+        # Process jobs in chunks to avoid query size limits
+        chunk_size = 20
+        
+        for i in range(0, len(jobs), chunk_size):
+            chunk = jobs[i:i + chunk_size]
+            
+            # Get job log streams for this chunk
+            job_streams = [job["job_log_stream"] for job in chunk]
+            pipeline_streams = [job["pipeline_log_stream"] for job in chunk]
+            
+            # Query job logs for error details
+            if job_streams:
+                job_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in job_streams])
+                
+                job_errors_query = f"""
+                fields @timestamp, @logStream, @message
+                | filter ({job_streams_filter})
+                | filter @message like /(?i)error|fail|exception|stop|cancel|timeout/
+                | sort @logStream, @timestamp desc
+                | limit 100
+                """
+                
+                job_error_results = self.run_query(self.config.job_log_group, job_errors_query)
+                
+                # Process job error results
+                job_errors_by_stream = {}
+                for result in job_error_results:
+                    stream = self._get_field_value(result, "@logStream")
+                    message = self._get_field_value(result, "@message")
+                    timestamp = self._get_field_value(result, "@timestamp")
+                    
+                    if stream not in job_errors_by_stream:
+                        job_errors_by_stream[stream] = []
+                    job_errors_by_stream[stream].append({
+                        "timestamp": timestamp,
+                        "message": message
+                    })
+            
+            # Query pipeline logs for status change context
+            if pipeline_streams:
+                pipeline_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in pipeline_streams])
+                
+                pipeline_context_query = f"""
+                fields @timestamp, @logStream, @message
+                | filter ({pipeline_streams_filter})
+                | filter @message like /JobStatus\.(STOPPED|CANCELLED|LOST)|marking.*LOST|Driver Failure/
+                | sort @logStream, @timestamp desc
+                | limit 100
+                """
+                
+                pipeline_context_results = self.run_query(self.config.pipeline_log_group, pipeline_context_query)
+                
+                # Process pipeline context results
+                pipeline_context_by_stream = {}
+                for result in pipeline_context_results:
+                    stream = self._get_field_value(result, "@logStream")
+                    message = self._get_field_value(result, "@message")
+                    timestamp = self._get_field_value(result, "@timestamp")
+                    
+                    if stream not in pipeline_context_by_stream:
+                        pipeline_context_by_stream[stream] = []
+                    pipeline_context_by_stream[stream].append({
+                        "timestamp": timestamp,
+                        "message": message
+                    })
+            
+            # Combine information for each job in this chunk
+            for job in chunk:
+                job_stream = job["job_log_stream"]
+                pipeline_stream = job["pipeline_log_stream"]
+                job_status = job["job_status"]
+                
+                # Extract failure reason based on status and available context
+                failure_reason = "Unknown reason"
+                failure_type = "unknown"
+                nomad_details = {}
+                
+                # Get context from logs
+                job_errors = job_errors_by_stream.get(job_stream, [])
+                pipeline_context = pipeline_context_by_stream.get(pipeline_stream, [])
+                
+                # Analyze based on job status
+                if job_status == "STOPPED":
+                    failure_type = "intentional_stop"
+                    if pipeline_context:
+                        # Look for reasons in pipeline logs
+                        for ctx in pipeline_context:
+                            if "STOPPED" in ctx["message"]:
+                                failure_reason = f"Job stopped: {ctx.get('message', '')[:200]}"
+                                break
+                        else:
+                            failure_reason = "Job was intentionally stopped"
+                    
+                elif job_status == "CANCELLED":
+                    failure_type = "intentional_cancel"
+                    if pipeline_context:
+                        for ctx in pipeline_context:
+                            if "CANCELLED" in ctx["message"]:
+                                failure_reason = f"Job cancelled: {ctx.get('message', '')[:200]}"
+                                break
+                        else:
+                            failure_reason = "Job was cancelled"
+                    
+                elif job_status == "LOST":
+                    failure_type = "infrastructure_timeout"
+                    
+                    # Check for specific LOST reasons in pipeline logs
+                    driver_failure = False
+                    timeout_reason = False
+                    
+                    for ctx in pipeline_context:
+                        msg = ctx.get("message", "")
+                        if "Driver Failure" in msg:
+                            failure_type = "driver_failure"
+                            failure_reason = f"Driver failure detected: {msg[:200]}"
+                            driver_failure = True
+                            nomad_details["driver_failure"] = msg
+                            break
+                        elif "marking" in msg.lower() and "lost" in msg.lower():
+                            if "timeout" in msg.lower():
+                                failure_reason = f"Job lost due to timeout: {msg[:200]}"
+                                timeout_reason = True
+                                nomad_details["timeout_reason"] = msg
+                            else:
+                                failure_reason = f"Job marked as LOST: {msg[:200]}"
+                                nomad_details["lost_reason"] = msg
+                    
+                    if not driver_failure and not timeout_reason:
+                        failure_reason = "Job lost due to infrastructure issues (timeout or node failure)"
+                
+                # Use nomad error pattern extraction for additional context
+                all_messages = [err["message"] for err in job_errors] + [ctx["message"] for ctx in pipeline_context]
+                if all_messages:
+                    for message in all_messages[:3]:  # Check first few messages
+                        nomad_pattern, nomad_type = self.error_extractor.extract_nomad_error_pattern(message)
+                        if nomad_type.startswith("nomad_"):
+                            nomad_details["pattern"] = nomad_pattern
+                            nomad_details["type"] = nomad_type
+                            if "unknown" in failure_reason.lower():
+                                failure_reason = f"Nomad issue detected: {nomad_pattern[:150]}"
+                            break
+                
+                terminal_details[job_stream] = {
+                    "job_status": job_status,
+                    "failure_type": failure_type,
+                    "failure_reason": failure_reason,
+                    "nomad_error_details": nomad_details,
+                    "job_errors": job_errors[:5],  # Limit to first 5 errors
+                    "pipeline_context": pipeline_context[:5],  # Limit to first 5 context messages
+                    "pipeline_log_stream": pipeline_stream,
+                    "timestamp": job.get("timestamp")
+                }
+        
+        logger.info(f"Extracted terminal status details for {len(terminal_details)} jobs")
+        return terminal_details
+
+    def extract_nomad_failures(self) -> Dict[str, Any]:
+        """
+        Extract nomad failure information from pipeline logs.
+        Queries for Driver Failures, dispatch failures, LOST markings, and job status changes.
+        
+        Returns:
+            Dictionary with categorized nomad failure information
+        """
+        logger.info("Extracting nomad failure information from pipeline logs...")
+        
+        # Build filter pattern based on whether collection is specified
+        if self.config.collection:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
+        else:
+            stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
+        
+        nomad_failures = {
+            "driver_failures": [],
+            "dispatch_failures": [],
+            "lost_markings": [],
+            "timeout_failures": [],
+            "status_transitions": [],
+            "summary": {
+                "total_driver_failures": 0,
+                "total_dispatch_failures": 0,
+                "total_lost_markings": 0,
+                "total_timeout_failures": 0,
+                "affected_jobs": set()
+            }
+        }
+        
+        # Query for Driver Failures
+        driver_failure_query = f"""
+        fields @timestamp, @logStream, @message
+        | filter @logStream like {stream_filter}
+        | filter @message like /Driver Failure/
+        | sort @timestamp desc
+        | limit 200
+        """
+        
+        driver_results = self.run_query(self.config.pipeline_log_group, driver_failure_query)
+        
+        for result in driver_results:
+            timestamp = self._get_field_value(result, "@timestamp")
+            pipeline_stream = self._get_field_value(result, "@logStream")
+            message = self._get_field_value(result, "@message")
+            
+            # Extract job information from message if available
+            job_match = re.search(r'Job\s+([^\s]+)', message)
+            job_id = job_match.group(1) if job_match else "unknown"
+            
+            # Extract allocation ID if available
+            alloc_match = re.search(r'allocation\s+([a-f0-9-]+)', message, re.IGNORECASE)
+            alloc_id = alloc_match.group(1) if alloc_match else "unknown"
+            
+            failure_info = {
+                "timestamp": timestamp,
+                "pipeline_log_stream": pipeline_stream,
+                "job_id": job_id,
+                "allocation_id": alloc_id,
+                "message": message,
+                "failure_type": "driver_failure"
+            }
+            
+            nomad_failures["driver_failures"].append(failure_info)
+            nomad_failures["summary"]["affected_jobs"].add(job_id)
+        
+        # Query for dispatch failures
+        dispatch_failure_query = f"""
+        fields @timestamp, @logStream, @message
+        | filter @logStream like {stream_filter}
+        | filter @message like /Failed to dispatch|dispatch.*fail/
+        | sort @timestamp desc
+        | limit 100
+        """
+        
+        dispatch_results = self.run_query(self.config.pipeline_log_group, dispatch_failure_query)
+        
+        for result in dispatch_results:
+            timestamp = self._get_field_value(result, "@timestamp")
+            pipeline_stream = self._get_field_value(result, "@logStream")
+            message = self._get_field_value(result, "@message")
+            
+            job_match = re.search(r'Job\s+([^\s]+)', message)
+            job_id = job_match.group(1) if job_match else "unknown"
+            
+            failure_info = {
+                "timestamp": timestamp,
+                "pipeline_log_stream": pipeline_stream,
+                "job_id": job_id,
+                "message": message,
+                "failure_type": "dispatch_failure"
+            }
+            
+            nomad_failures["dispatch_failures"].append(failure_info)
+            nomad_failures["summary"]["affected_jobs"].add(job_id)
+        
+        # Query for LOST markings
+        lost_marking_query = f"""
+        fields @timestamp, @logStream, @message
+        | filter @logStream like {stream_filter}
+        | filter @message like /marking.*LOST|JobStatus.*LOST/
+        | sort @timestamp desc
+        | limit 200
+        """
+        
+        lost_results = self.run_query(self.config.pipeline_log_group, lost_marking_query)
+        
+        for result in lost_results:
+            timestamp = self._get_field_value(result, "@timestamp")
+            pipeline_stream = self._get_field_value(result, "@logStream")
+            message = self._get_field_value(result, "@message")
+            
+            job_match = re.search(r'Job\s+([^\s]+)', message)
+            job_id = job_match.group(1) if job_match else "unknown"
+            
+            # Determine if this is a timeout-related LOST
+            is_timeout = "timeout" in message.lower()
+            
+            failure_info = {
+                "timestamp": timestamp,
+                "pipeline_log_stream": pipeline_stream,
+                "job_id": job_id,
+                "message": message,
+                "failure_type": "lost_marking",
+                "is_timeout": is_timeout
+            }
+            
+            nomad_failures["lost_markings"].append(failure_info)
+            nomad_failures["summary"]["affected_jobs"].add(job_id)
+            
+            if is_timeout:
+                nomad_failures["timeout_failures"].append(failure_info)
+        
+        # Query for job status transitions (for context)
+        status_transition_query = f"""
+        fields @timestamp, @logStream, @message
+        | filter @logStream like {stream_filter}
+        | filter @message like /JobStatus\.(STOPPED|CANCELLED|LOST|FAILED)/
+        | sort @timestamp desc
+        | limit 300
+        """
+        
+        transition_results = self.run_query(self.config.pipeline_log_group, status_transition_query)
+        
+        for result in transition_results:
+            timestamp = self._get_field_value(result, "@timestamp")
+            pipeline_stream = self._get_field_value(result, "@logStream")
+            message = self._get_field_value(result, "@message")
+            
+            job_match = re.search(r'Job\s+([^\s]+)', message)
+            job_id = job_match.group(1) if job_match else "unknown"
+            
+            # Extract status from message
+            status_match = re.search(r'JobStatus\.(\w+)', message)
+            status = status_match.group(1) if status_match else "unknown"
+            
+            transition_info = {
+                "timestamp": timestamp,
+                "pipeline_log_stream": pipeline_stream,
+                "job_id": job_id,
+                "status": status,
+                "message": message,
+                "failure_type": "status_transition"
+            }
+            
+            nomad_failures["status_transitions"].append(transition_info)
+            nomad_failures["summary"]["affected_jobs"].add(job_id)
+        
+        # Update summary counts
+        nomad_failures["summary"]["total_driver_failures"] = len(nomad_failures["driver_failures"])
+        nomad_failures["summary"]["total_dispatch_failures"] = len(nomad_failures["dispatch_failures"])
+        nomad_failures["summary"]["total_lost_markings"] = len(nomad_failures["lost_markings"])
+        nomad_failures["summary"]["total_timeout_failures"] = len(nomad_failures["timeout_failures"])
+        nomad_failures["summary"]["total_affected_jobs"] = len(nomad_failures["summary"]["affected_jobs"])
+        
+        # Convert set to list for JSON serialization
+        nomad_failures["summary"]["affected_jobs"] = list(nomad_failures["summary"]["affected_jobs"])
+        
+        logger.info(
+            f"Extracted nomad failures: {nomad_failures['summary']['total_driver_failures']} driver failures, "
+            f"{nomad_failures['summary']['total_dispatch_failures']} dispatch failures, "
+            f"{nomad_failures['summary']['total_lost_markings']} lost markings, "
+            f"{nomad_failures['summary']['total_timeout_failures']} timeout failures, "
+            f"affecting {nomad_failures['summary']['total_affected_jobs']} jobs"
+        )
+        
+        return nomad_failures

@@ -74,6 +74,23 @@ class HTMLGenerator:
             'status_groups': analysis_results.get('status_groups', {}),
             'summary': analysis_results.get('summary', {}),
             
+            # Enhanced failure analysis data
+            'terminal_status_details': analysis_results.get('terminal_status_details', {}),
+            'nomad_failures': analysis_results.get('nomad_failures', {}),
+            'action_items': analysis_results.get('action_items', []),
+            
+            # Nomad failure summary counts
+            'driver_failures_count': analysis_results.get('driver_failures_count', 0),
+            'dispatch_failures_count': analysis_results.get('dispatch_failures_count', 0),
+            'timeout_failures_count': analysis_results.get('timeout_failures_count', 0),
+            'nomad_affected_jobs_count': analysis_results.get('nomad_affected_jobs_count', 0),
+            
+            # Terminal status analysis counts
+            'terminal_status_analyzed_count': analysis_results.get('terminal_status_analyzed_count', 0),
+            'terminal_driver_failures': analysis_results.get('terminal_driver_failures', 0),
+            'terminal_intentional_stops': analysis_results.get('terminal_intentional_stops', 0),
+            'terminal_timeout_issues': analysis_results.get('terminal_timeout_issues', 0),
+            
             # Explicitly exclude S3 metrics data
             'missing_metrics_count': 0,
             'empty_metrics_count': 0,

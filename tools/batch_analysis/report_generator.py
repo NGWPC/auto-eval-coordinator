@@ -384,35 +384,208 @@ class ReportGenerator:
         logger.info(f"Generated running jobs report: {output_file}")
         return str(output_file)
 
-    def generate_stopped_cancelled_jobs_report(self, stopped_jobs: List[Dict], cancelled_jobs: List[Dict]) -> str:
-        """Generate CSV report of stopped and cancelled jobs."""
+    def generate_stopped_cancelled_jobs_report(self, stopped_jobs: List[Dict], cancelled_jobs: List[Dict], terminal_status_details: Dict = None) -> str:
+        """Generate CSV report of stopped and cancelled jobs with enhanced failure reason analysis."""
         output_file = self.output_dir / "stopped_cancelled_jobs.csv"
 
+        if terminal_status_details is None:
+            terminal_status_details = {}
+
         with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "reason"]
+            fieldnames = ["timestamp", "pipeline_log_stream", "job_log_stream", "job_status", "failure_type", "failure_reason", "nomad_details", "investigation_priority"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
             
             for job in stopped_jobs:
+                job_stream = job.get("job_log_stream", "")
+                details = terminal_status_details.get(job_stream, {})
+                
+                failure_type = details.get("failure_type", "intentional_stop")
+                failure_reason = details.get("failure_reason", "Job was intentionally stopped or terminated")
+                nomad_details = details.get("nomad_error_details", {})
+                
+                # Determine investigation priority based on available details
+                if nomad_details or "error" in failure_reason.lower() or "fail" in failure_reason.lower():
+                    priority = "HIGH - Requires investigation"
+                elif "unknown" in failure_reason.lower():
+                    priority = "MEDIUM - Check for context"
+                else:
+                    priority = "LOW - Likely intentional"
+                
                 writer.writerow({
                     "timestamp": job.get("timestamp", ""),
                     "pipeline_log_stream": job.get("pipeline_log_stream", ""),
-                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_log_stream": job_stream,
                     "job_status": job.get("job_status", "STOPPED"),
-                    "reason": "Job was intentionally stopped or terminated"
+                    "failure_type": failure_type,
+                    "failure_reason": failure_reason,
+                    "nomad_details": json.dumps(nomad_details) if nomad_details else "",
+                    "investigation_priority": priority
                 })
             
             for job in cancelled_jobs:
+                job_stream = job.get("job_log_stream", "")
+                details = terminal_status_details.get(job_stream, {})
+                
+                failure_type = details.get("failure_type", "intentional_cancel")
+                failure_reason = details.get("failure_reason", "Job was cancelled before completion")
+                nomad_details = details.get("nomad_error_details", {})
+                
+                # Determine investigation priority based on available details
+                if nomad_details or "error" in failure_reason.lower() or "fail" in failure_reason.lower():
+                    priority = "HIGH - Requires investigation"
+                elif "unknown" in failure_reason.lower():
+                    priority = "MEDIUM - Check for context"
+                else:
+                    priority = "LOW - Likely intentional"
+                
                 writer.writerow({
                     "timestamp": job.get("timestamp", ""),
                     "pipeline_log_stream": job.get("pipeline_log_stream", ""),
-                    "job_log_stream": job.get("job_log_stream", ""),
+                    "job_log_stream": job_stream,
                     "job_status": job.get("job_status", "CANCELLED"),
-                    "reason": "Job was cancelled before completion"
+                    "failure_type": failure_type,
+                    "failure_reason": failure_reason,
+                    "nomad_details": json.dumps(nomad_details) if nomad_details else "",
+                    "investigation_priority": priority
                 })
 
-        logger.info(f"Generated stopped/cancelled jobs report: {output_file}")
+        logger.info(f"Generated enhanced stopped/cancelled jobs report: {output_file}")
+        return str(output_file)
+
+    def generate_infrastructure_failure_report(self, lost_jobs: List[Dict], terminal_status_details: Dict = None, nomad_failures: Dict = None) -> str:
+        """Generate CSV report of infrastructure failures (LOST jobs) with detailed analysis."""
+        output_file = self.output_dir / "infrastructure_failures.csv"
+
+        if terminal_status_details is None:
+            terminal_status_details = {}
+        if nomad_failures is None:
+            nomad_failures = {"driver_failures": [], "timeout_failures": [], "lost_markings": []}
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = [
+                "timestamp", "pipeline_log_stream", "job_log_stream", "job_status", 
+                "failure_type", "failure_reason", "nomad_details", "driver_failure_detected",
+                "timeout_detected", "investigation_priority", "recommended_action"
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            
+            for job in lost_jobs:
+                job_stream = job.get("job_log_stream", "")
+                details = terminal_status_details.get(job_stream, {})
+                
+                failure_type = details.get("failure_type", "infrastructure_timeout")
+                failure_reason = details.get("failure_reason", "Job lost due to infrastructure issues")
+                nomad_details = details.get("nomad_error_details", {})
+                
+                # Check if this job appears in specific nomad failure categories
+                driver_failure_detected = any(f.get("job_id", "") in job_stream for f in nomad_failures.get("driver_failures", []))
+                timeout_detected = any(f.get("job_id", "") in job_stream for f in nomad_failures.get("timeout_failures", []))
+                
+                # Determine investigation priority and recommended action
+                if driver_failure_detected:
+                    priority = "CRITICAL - Driver failure"
+                    action = "Investigate driver configuration, resource allocation, and container runtime issues"
+                elif failure_type == "driver_failure":
+                    priority = "HIGH - Driver issue in logs"
+                    action = "Check driver logs and job allocation details"
+                elif timeout_detected:
+                    priority = "HIGH - Timeout confirmed"
+                    action = "Review job runtime limits and cluster resource availability"  
+                elif nomad_details:
+                    priority = "MEDIUM - Nomad context available"
+                    action = "Review nomad error details for specific cause"
+                else:
+                    priority = "LOW - Standard timeout"
+                    action = "Likely infrastructure timeout - verify cluster health during job execution time"
+                
+                writer.writerow({
+                    "timestamp": job.get("timestamp", ""),
+                    "pipeline_log_stream": job.get("pipeline_log_stream", ""),
+                    "job_log_stream": job_stream,
+                    "job_status": job.get("job_status", "LOST"),
+                    "failure_type": failure_type,
+                    "failure_reason": failure_reason,
+                    "nomad_details": json.dumps(nomad_details) if nomad_details else "",
+                    "driver_failure_detected": "YES" if driver_failure_detected else "NO",
+                    "timeout_detected": "YES" if timeout_detected else "NO",
+                    "investigation_priority": priority,
+                    "recommended_action": action
+                })
+
+        logger.info(f"Generated infrastructure failures report: {output_file}")
+        return str(output_file)
+
+    def generate_nomad_failures_report(self, nomad_failures: Dict) -> str:
+        """Generate CSV report of nomad-specific failures extracted from pipeline logs."""
+        output_file = self.output_dir / "nomad_failures.csv"
+
+        with open(output_file, "w", newline="", encoding="utf-8") as csvfile:
+            fieldnames = [
+                "timestamp", "pipeline_log_stream", "job_id", "allocation_id",
+                "failure_type", "message", "severity", "category"
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            writer.writeheader()
+            
+            # Write driver failures
+            for failure in nomad_failures.get("driver_failures", []):
+                writer.writerow({
+                    "timestamp": failure.get("timestamp", ""),
+                    "pipeline_log_stream": failure.get("pipeline_log_stream", ""),
+                    "job_id": failure.get("job_id", ""),
+                    "allocation_id": failure.get("allocation_id", ""),
+                    "failure_type": "Driver Failure",
+                    "message": failure.get("message", "")[:500],  # Limit message length
+                    "severity": "CRITICAL",
+                    "category": "Infrastructure - Driver"
+                })
+            
+            # Write dispatch failures
+            for failure in nomad_failures.get("dispatch_failures", []):
+                writer.writerow({
+                    "timestamp": failure.get("timestamp", ""),
+                    "pipeline_log_stream": failure.get("pipeline_log_stream", ""),
+                    "job_id": failure.get("job_id", ""),
+                    "allocation_id": "",
+                    "failure_type": "Dispatch Failure",
+                    "message": failure.get("message", "")[:500],
+                    "severity": "HIGH",
+                    "category": "Infrastructure - Dispatch"
+                })
+            
+            # Write timeout failures (subset of lost markings)
+            for failure in nomad_failures.get("timeout_failures", []):
+                writer.writerow({
+                    "timestamp": failure.get("timestamp", ""),
+                    "pipeline_log_stream": failure.get("pipeline_log_stream", ""),
+                    "job_id": failure.get("job_id", ""),
+                    "allocation_id": "",
+                    "failure_type": "Timeout/LOST",
+                    "message": failure.get("message", "")[:500],
+                    "severity": "MEDIUM",
+                    "category": "Infrastructure - Timeout"
+                })
+            
+            # Write other lost markings (non-timeout)
+            for failure in nomad_failures.get("lost_markings", []):
+                if not failure.get("is_timeout", False):  # Skip timeouts as they're handled above
+                    writer.writerow({
+                        "timestamp": failure.get("timestamp", ""),
+                        "pipeline_log_stream": failure.get("pipeline_log_stream", ""),
+                        "job_id": failure.get("job_id", ""),
+                        "allocation_id": "",
+                        "failure_type": "LOST Marking",
+                        "message": failure.get("message", "")[:500],
+                        "severity": "MEDIUM",
+                        "category": "Infrastructure - Lost"
+                    })
+
+        logger.info(f"Generated nomad failures report: {output_file}")
         return str(output_file)
 
     def generate_comprehensive_status_reports(self, analysis_results: Dict[str, Any]) -> List[str]:
@@ -438,7 +611,23 @@ class ReportGenerator:
         if jobs_by_status.get("STOPPED") or jobs_by_status.get("CANCELLED"):
             reports.append(self.generate_stopped_cancelled_jobs_report(
                 jobs_by_status.get("STOPPED", []), 
-                jobs_by_status.get("CANCELLED", [])
+                jobs_by_status.get("CANCELLED", []),
+                analysis_results.get("terminal_status_details", {})
             ))
+        
+        # Generate infrastructure failure report for LOST jobs
+        if jobs_by_status.get("LOST"):
+            reports.append(self.generate_infrastructure_failure_report(
+                jobs_by_status.get("LOST", []),
+                analysis_results.get("terminal_status_details", {}),
+                analysis_results.get("nomad_failures", {})
+            ))
+        
+        # Generate nomad failures report if there are any nomad failures
+        nomad_failures = analysis_results.get("nomad_failures", {})
+        if (nomad_failures.get("summary", {}).get("total_driver_failures", 0) > 0 or
+            nomad_failures.get("summary", {}).get("total_dispatch_failures", 0) > 0 or
+            nomad_failures.get("summary", {}).get("total_lost_markings", 0) > 0):
+            reports.append(self.generate_nomad_failures_report(nomad_failures))
         
         return reports

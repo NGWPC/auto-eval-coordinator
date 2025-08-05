@@ -122,6 +122,61 @@ class ErrorPatternExtractor:
         
         return normalized
 
+    def extract_nomad_error_pattern(self, message: str) -> Tuple[str, str]:
+        """
+        Extract nomad-specific error patterns from log messages.
+        
+        Returns:
+            Tuple of (error_pattern, error_type)
+        """
+        # Nomad-specific error patterns
+        nomad_patterns = [
+            # Driver failures
+            (r'Driver Failure.*?(\w+)', 'driver_failure'),
+            (r'driver.*?failure.*?(\w+)', 'driver_failure'),
+            (r'Failed to start task.*?driver', 'driver_start_failure'),
+            
+            # Allocation failures
+            (r'Failed to dispatch.*?allocation', 'allocation_dispatch_failure'),
+            (r'allocation.*?failed.*?placement', 'allocation_placement_failure'),
+            (r'no eligible node.*?allocation', 'allocation_no_nodes'),
+            
+            # Node issues
+            (r'node.*?disconnect.*', 'node_disconnection'),
+            (r'node.*?down.*', 'node_failure'),
+            (r'lost connection.*?node', 'node_connection_loss'),
+            
+            # Resource exhaustion
+            (r'insufficient.*?resource', 'resource_exhaustion'),
+            (r'out of.*?memory', 'memory_exhaustion'),
+            (r'disk.*?full', 'disk_exhaustion'),
+            (r'cpu.*?limit.*?exceeded', 'cpu_limit_exceeded'),
+            
+            # Timeout issues
+            (r'marking.*?LOST.*?timeout', 'timeout_lost'),
+            (r'job.*?timeout', 'job_timeout'),
+            (r'allocation.*?timeout', 'allocation_timeout'),
+            
+            # Status transitions
+            (r'JobStatus.*?LOST.*?reason', 'job_status_lost'),
+            (r'JobStatus.*?STOPPED.*?reason', 'job_status_stopped'),
+            (r'JobStatus.*?CANCELLED.*?reason', 'job_status_cancelled'),
+        ]
+        
+        # Try to match nomad-specific patterns first
+        for pattern_regex, error_type in nomad_patterns:
+            match = re.search(pattern_regex, message, re.IGNORECASE | re.DOTALL)
+            if match:
+                # Extract relevant part of the message around the match
+                start = max(0, match.start() - 50)
+                end = min(len(message), match.end() + 100)
+                context = message[start:end].strip()
+                normalized_pattern = self._normalize_pattern(context)
+                return normalized_pattern, f"nomad_{error_type}"
+        
+        # Fallback to regular error pattern extraction
+        return self.extract_raw_error_pattern(message)
+
     def group_similar_errors(self, error_messages: List[str]) -> Dict[str, List[str]]:
         """
         Group similar error messages by their extracted patterns.

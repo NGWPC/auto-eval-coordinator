@@ -44,6 +44,9 @@ class JobInfo:
     timestamp: Optional[str] = None
     error_messages: Optional[List[str]] = None
     exit_code: Optional[int] = None
+    failure_type: Optional[str] = None  # Type of failure (application, driver, timeout, cancelled)
+    failure_reason: Optional[str] = None  # Detailed reason extracted from logs
+    nomad_error_details: Optional[Dict[str, Any]] = None  # Dict containing nomad-specific error info
 
 
 @dataclass

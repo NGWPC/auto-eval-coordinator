@@ -73,6 +73,30 @@ class BatchRunAnalyzer:
             # Copy comprehensive analysis results
             results.update(comprehensive_results)
             
+            # Enhance summary with nomad failure details
+            nomad_failures = comprehensive_results.get("nomad_failures", {})
+            nomad_summary = nomad_failures.get("summary", {})
+            results["driver_failures_count"] = nomad_summary.get("total_driver_failures", 0)
+            results["dispatch_failures_count"] = nomad_summary.get("total_dispatch_failures", 0)
+            results["timeout_failures_count"] = nomad_summary.get("total_timeout_failures", 0)
+            results["nomad_affected_jobs_count"] = nomad_summary.get("total_affected_jobs", 0)
+            
+            # Enhance summary with terminal status details breakdown
+            terminal_details = comprehensive_results.get("terminal_status_details", {})
+            results["terminal_status_analyzed_count"] = len(terminal_details)
+            
+            # Count specific failure types from terminal analysis
+            driver_failure_from_terminal = sum(1 for details in terminal_details.values() 
+                                             if details.get("failure_type") == "driver_failure")
+            intentional_stops = sum(1 for details in terminal_details.values() 
+                                  if details.get("failure_type") in ["intentional_stop", "intentional_cancel"])
+            timeout_issues = sum(1 for details in terminal_details.values() 
+                               if details.get("failure_type") == "infrastructure_timeout")
+            
+            results["terminal_driver_failures"] = driver_failure_from_terminal
+            results["terminal_intentional_stops"] = intentional_stops  
+            results["terminal_timeout_issues"] = timeout_issues
+            
             # Generate executive summary
             logger.info("=== Generating Executive Summary ===")
             executive_summary = self.summary_analyzer.generate_executive_summary(comprehensive_results)
