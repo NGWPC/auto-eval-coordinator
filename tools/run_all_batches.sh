@@ -129,7 +129,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         fi
         
         echo "--- Purging Dispatch Jobs after $collection ---"
-        purge_cmd="python tools/purge_dispatch_jobs.py"
+        purge_cmd="python tools/purge_dispatch_jobs.py && nomad system gc"
         
         if confirm_command "$purge_cmd"; then
             echo "Executing purge_dispatch_jobs.py..."
