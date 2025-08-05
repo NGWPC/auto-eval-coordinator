@@ -70,6 +70,10 @@ class HTMLGenerator:
             'status_percentages': analysis_results.get('status_percentages', {}),
             'jobs_by_status': analysis_results.get('jobs_by_status', {}),
             
+            # Required template data
+            'status_groups': analysis_results.get('status_groups', {}),
+            'summary': analysis_results.get('summary', {}),
+            
             # Explicitly exclude S3 metrics data
             'missing_metrics_count': 0,
             'empty_metrics_count': 0,

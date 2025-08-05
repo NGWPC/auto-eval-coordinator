@@ -127,6 +127,12 @@ class BatchRunAnalyzer:
             # Get unique errors and failed pipelines from results
             unique_errors = comprehensive_results.get("unique_errors", [])
             failed_pipelines = comprehensive_results.get("failed_pipelines", [])
+            
+            # Update counts in results
+            results["failed_jobs_count"] = len(failed_jobs)
+            results["failed_pipelines_count"] = len(failed_pipelines)
+            results["unique_error_patterns_count"] = len(unique_errors)
+            results["submitted_pipelines_count"] = comprehensive_results.get("summary", {}).get("total_jobs", 0)
 
             # Generate reports
             if failed_jobs:

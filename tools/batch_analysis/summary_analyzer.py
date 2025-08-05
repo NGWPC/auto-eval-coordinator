@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from .models import UniqueErrorInfo
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +50,13 @@ class SummaryAnalyzer:
         
         # Add top 3 error patterns
         for error in unique_errors[:3]:
-            if error["occurrence_count"] >= 3:
+            if error.occurrence_count >= 3:
                 top_issues.append({
                     "type": "Application Error",
-                    "severity": "HIGH" if error["occurrence_count"] >= 10 else "MEDIUM",
-                    "impact": f"{error['occurrence_count']} jobs affected",
-                    "percentage": round((error["occurrence_count"] / total_jobs * 100), 1) if total_jobs > 0 else 0,
-                    "pattern": error["error_pattern"][:100]
+                    "severity": "HIGH" if error.occurrence_count >= 10 else "MEDIUM",
+                    "impact": f"{error.occurrence_count} jobs affected",
+                    "percentage": round((error.occurrence_count / total_jobs * 100), 1) if total_jobs > 0 else 0,
+                    "pattern": error.error_pattern[:100]
                 })
         
         # Generate recommendations
@@ -219,7 +220,7 @@ class SummaryAnalyzer:
         return max(0, min(100, int(score)))
     
     def _generate_recommendations(self, summary: Dict[str, Any], status_groups: Dict[str, List], 
-                                unique_errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                                unique_errors: List[UniqueErrorInfo]) -> List[Dict[str, Any]]:
         """Generate prioritized recommendations based on analysis."""
         recommendations = []
         
@@ -244,13 +245,13 @@ class SummaryAnalyzer:
         # Error pattern recommendations
         if unique_errors:
             top_error = unique_errors[0]
-            if top_error["occurrence_count"] >= 5:
-                impact_rate = round((top_error["occurrence_count"] / summary.get("total_jobs", 1)) * 100, 1)
+            if top_error.occurrence_count >= 5:
+                impact_rate = round((top_error.occurrence_count / summary.get("total_jobs", 1)) * 100, 1)
                 recommendations.append({
                     "priority": "HIGH",
                     "category": "Application Error",
                     "title": "Fix Most Common Error Pattern",
-                    "description": f"Error affecting {top_error['occurrence_count']} jobs ({impact_rate}%): {top_error['error_pattern'][:100]}",
+                    "description": f"Error affecting {top_error.occurrence_count} jobs ({impact_rate}%): {top_error.error_pattern[:100]}",
                     "actions": [
                         "Review error pattern in affected jobs",
                         "Fix root cause in application code",
@@ -284,7 +285,7 @@ class SummaryAnalyzer:
         return recommendations
     
     def _calculate_potential_improvements(self, summary: Dict[str, Any], status_groups: Dict[str, List],
-                                        unique_errors: List[Dict[str, Any]]) -> Dict[str, Any]:
+                                        unique_errors: List[UniqueErrorInfo]) -> Dict[str, Any]:
         """Calculate potential improvements if recommendations are followed."""
         current_success_rate = summary.get("success_rate", 0)
         
@@ -294,8 +295,8 @@ class SummaryAnalyzer:
         # Potential recovery from fixing top errors
         error_recovery = 0
         for error in unique_errors[:3]:  # Top 3 errors
-            if error["occurrence_count"] >= 3:
-                error_recovery += (error["occurrence_count"] / summary.get("total_jobs", 1)) * 100
+            if error.occurrence_count >= 3:
+                error_recovery += (error.occurrence_count / summary.get("total_jobs", 1)) * 100
         
         error_recovery = min(error_recovery, summary.get("failure_rate", 0))  # Cap at current failure rate
         

@@ -715,7 +715,7 @@
           <div class="error-details" id="error-details-{{ loop.index0 }}">
             <div class="error-pattern-text">{{ error.error_pattern }}</div>
             <div class="mb-1"><strong>Error Type:</strong> {{ error.error_type }}</div>
-            <div class="mb-1"><strong>First Occurrence:</strong> {{ error.first_occurrence.timestamp }}</div>
+            <div class="mb-1"><strong>First Occurrence:</strong> {{ error.first_occurrence_timestamp }}</div>
             <div class="mb-2"><strong>Affected Jobs ({{ error.occurrence_count }}):</strong></div>
             <div class="affected-jobs">
               {% for job_stream in error.affected_job_streams %}
