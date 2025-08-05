@@ -36,7 +36,7 @@ class CloudWatchAnalyzer:
         self.error_extractor = ErrorPatternExtractor()
 
     def run_query(self, log_group: str, query_string: str) -> List[Dict]:
-        """Execute a CloudWatch Logs Insights query and return results."""
+        """Execute a CloudWatch Logs Insights query and return results, automatically paginating if needed."""
         try:
             start_time = int(
                 (time.time() - self.config.time_range_days * 86400) * 1000
@@ -47,6 +47,7 @@ class CloudWatchAnalyzer:
                 f"Running query on {log_group}: {query_string[:100]}..."
             )
 
+            # Try single query first
             start_query_response = self.client.start_query(
                 logGroupName=log_group,
                 startTime=start_time,
@@ -65,13 +66,104 @@ class CloudWatchAnalyzer:
                 time.sleep(2)
                 response = self.client.get_query_results(queryId=query_id)
 
-            logger.info(
-                f"Query completed with {len(response['results'])} results"
-            )
-            return response["results"]
+            results = response["results"]
+
+            # If we hit the 10k limit, automatically paginate
+            if len(results) >= 10000:
+                logger.info(
+                    f"Hit 10,000 result limit, automatically paginating query..."
+                )
+                return self._run_query_paginated(
+                    log_group, query_string, start_time, end_time
+                )
+
+            logger.info(f"Query completed with {len(results)} results")
+            return results
 
         except Exception as e:
             logger.error(f"Error running query on {log_group}: {e}")
+            return []
+
+    def _run_query_paginated(
+        self,
+        log_group: str,
+        query_string: str,
+        start_time: int,
+        end_time: int,
+        minutes_per_batch: int = 20,
+    ) -> List[Dict]:
+        """
+        Execute a CloudWatch Logs Insights query with time-based pagination.
+
+        Args:
+            log_group: CloudWatch log group name
+            query_string: CloudWatch Logs Insights query
+            start_time: Start time in milliseconds
+            end_time: End time in milliseconds
+            minutes_per_batch: Number of minutes per time window
+
+        Returns:
+            Combined results from all time windows
+        """
+        try:
+            batch_duration_ms = minutes_per_batch * 60 * 1000
+            all_results = []
+            batch_count = 0
+
+            current_start = start_time
+
+            logger.info(
+                f"Running paginated query with {minutes_per_batch}min batches..."
+            )
+
+            while current_start < end_time:
+                current_end = min(current_start + batch_duration_ms, end_time)
+                batch_count += 1
+
+                logger.info(
+                    f"Batch {batch_count}: {time.strftime('%m-%d %H:%M', time.gmtime(current_start / 1000))} "
+                    f"to {time.strftime('%m-%d %H:%M', time.gmtime(current_end / 1000))}"
+                )
+
+                start_query_response = self.client.start_query(
+                    logGroupName=log_group,
+                    startTime=current_start,
+                    endTime=current_end,
+                    queryString=query_string,
+                )
+                query_id = start_query_response["queryId"]
+
+                # Poll for completion
+                response = None
+                while response is None or response["status"] in [
+                    "Running",
+                    "Scheduled",
+                ]:
+                    time.sleep(2)
+                    response = self.client.get_query_results(queryId=query_id)
+
+                batch_results = response["results"]
+                all_results.extend(batch_results)
+
+                logger.info(
+                    f"Batch {batch_count}: {len(batch_results)} results (total: {len(all_results)})"
+                )
+
+                # If a batch still hits 10k, warn and continue
+                if len(batch_results) >= 10000:
+                    logger.warning(
+                        f"Batch {batch_count} hit 10k limit - consider reducing batch size"
+                    )
+
+                current_start = current_end
+
+            logger.info(
+                f"Paginated query completed: {len(all_results)} total results from {batch_count} batches"
+            )
+            return all_results
+
+        except Exception as e:
+            logger.error(f"Error running paginated query: {e}")
             return []
 
     def find_submitted_pipelines(self) -> Set[str]:
@@ -103,10 +195,12 @@ class CloudWatchAnalyzer:
         logger.info(
             f"Found {len(submitted_streams)} total submitted pipeline streams"
         )
-        
+
         # Filter to only the latest attempt for each unique pipeline identity
-        latest_submitted_streams = self._get_latest_pipeline_per_identity(submitted_streams)
-        
+        latest_submitted_streams = self._get_latest_pipeline_per_identity(
+            submitted_streams
+        )
+
         logger.info(
             f"After filtering for latest attempts: {len(latest_submitted_streams)} unique pipeline streams"
         )
@@ -174,11 +268,13 @@ class CloudWatchAnalyzer:
     def find_failed_pipelines(self) -> List[FailedPipelineInfo]:
         """
         Find pipelines that failed for non-job reasons (missing 'INFO Pipeline SUCCESS' message).
-        
+
         Note: This method now only considers the latest attempt for each unique pipeline identity.
         Pipeline restarts are handled by find_submitted_pipelines() which filters to latest attempts.
         """
-        logger.info("Finding pipelines that failed for non-job reasons (latest attempts only)...")
+        logger.info(
+            "Finding pipelines that failed for non-job reasons (latest attempts only)..."
+        )
 
         # Build filter pattern based on whether collection is specified
         if self.config.collection:
@@ -305,52 +401,54 @@ class CloudWatchAnalyzer:
     def _extract_pipeline_identity(self, stream: str) -> tuple:
         """
         Extract the base identity of a pipeline from its log stream name.
-        
-        Pipeline streams have format: 
+
+        Pipeline streams have format:
         pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]-TIMESTAMP-HASH
-        
+
         Returns: (batch_name, aoi_name, collection) tuple
         """
         # Pattern to extract batch_name, aoi_name, and collection from the stream name
         # All pipelines will always have a collection parameter
         pattern = r"pipeline/dispatch-\[batch_name=([^,\]]+),aoi_name=([^,\]]+),collection=([^,\]]+)\]"
         match = re.search(pattern, stream)
-        
+
         if match:
             batch_name = match.group(1)
             aoi_name = match.group(2)
             collection = match.group(3)
             return (batch_name, aoi_name, collection)
-        
+
         # Fallback: try to extract just the parts we can identify
-        logger.warning(f"Unable to parse pipeline identity from stream: {stream}")
+        logger.warning(
+            f"Unable to parse pipeline identity from stream: {stream}"
+        )
         return ("unknown", "unknown", None)
 
     def _get_latest_pipeline_per_identity(self, streams: Set[str]) -> Set[str]:
         """
         Group pipeline streams by their base identity and return only the latest attempt for each.
-        
+
         Args:
             streams: Set of pipeline log stream names
-            
+
         Returns:
             Set of stream names containing only the latest attempt for each unique pipeline identity
         """
         if not streams:
             return set()
-            
+
         # Group streams by their base identity
         identity_to_streams = {}
-        
+
         for stream in streams:
             identity = self._extract_pipeline_identity(stream)
             if identity not in identity_to_streams:
                 identity_to_streams[identity] = []
             identity_to_streams[identity].append(stream)
-        
+
         # For each identity, find the stream with the latest timestamp
         latest_streams = set()
-        
+
         for identity, stream_list in identity_to_streams.items():
             if len(stream_list) == 1:
                 # Only one stream for this identity, use it
@@ -359,12 +457,14 @@ class CloudWatchAnalyzer:
                 # Multiple streams, find the one with the latest timestamp
                 latest_stream = None
                 latest_timestamp = 0
-                
+
                 for stream in stream_list:
                     # Extract timestamp from stream name
                     # Format: pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]-TIMESTAMP-HASH
                     # All pipelines will always have a collection parameter
-                    timestamp_match = re.search(r"collection=[^\]]+\]-(\d+)-[a-f0-9]+$", stream)
+                    timestamp_match = re.search(
+                        r"collection=[^\]]+\]-(\d+)-[a-f0-9]+$", stream
+                    )
                     if timestamp_match:
                         timestamp = int(timestamp_match.group(1))
                         if timestamp > latest_timestamp:
@@ -374,16 +474,22 @@ class CloudWatchAnalyzer:
                         # Fallback: if we can't parse timestamp, use the stream name lexicographically
                         if latest_stream is None or stream > latest_stream:
                             latest_stream = stream
-                
+
                 if latest_stream:
                     latest_streams.add(latest_stream)
-                    logger.debug(f"Selected latest stream for identity {identity}: {latest_stream} from {len(stream_list)} attempts")
+                    logger.debug(
+                        f"Selected latest stream for identity {identity}: {latest_stream} from {len(stream_list)} attempts"
+                    )
                 else:
                     # Fallback: just pick the first one
                     latest_streams.add(stream_list[0])
-                    logger.warning(f"Could not determine latest stream for identity {identity}, using first: {stream_list[0]}")
-        
-        logger.info(f"Filtered {len(streams)} pipeline streams down to {len(latest_streams)} latest attempts")
+                    logger.warning(
+                        f"Could not determine latest stream for identity {identity}, using first: {stream_list[0]}"
+                    )
+
+        logger.info(
+            f"Filtered {len(streams)} pipeline streams down to {len(latest_streams)} latest attempts"
+        )
         return latest_streams
 
     def get_errors_for_failed_jobs_bulk(
@@ -700,8 +806,6 @@ class CloudWatchAnalyzer:
         failed_jobs = status_groups[
             "application_failures"
         ]  # Only FAILED jobs, not LOST
-        # TEMP DEBUG: Limit to first 50 failed jobs to speed up processing
-        failed_jobs = failed_jobs[:50]
         failed_job_streams = [job["job_log_stream"] for job in failed_jobs]
 
         error_results = {}
@@ -721,8 +825,6 @@ class CloudWatchAnalyzer:
             status_groups["infrastructure_issues"]  # LOST jobs
             + status_groups["intentional_stops"]  # STOPPED, CANCELLED jobs
         )
-        # TEMP DEBUG: Limit to first 20 terminal jobs to speed up processing
-        terminal_jobs = terminal_jobs[:20]
         terminal_status_details = {}
         if terminal_jobs:
             terminal_status_details = self.get_terminal_status_details(
@@ -735,8 +837,7 @@ class CloudWatchAnalyzer:
         # Step 3: Analyze error patterns and create unique error analysis
         error_patterns = defaultdict(list)
 
-        # TEMP DEBUG: Already limited failed_jobs above, but process only first 30 for pattern analysis
-        for job in failed_jobs[:30]:
+        for job in failed_jobs:
             job_stream = job["job_log_stream"]
             error_messages = error_messages_by_stream.get(job_stream, [])
 
@@ -1141,7 +1242,7 @@ class CloudWatchAnalyzer:
         """
         Extract nomad failure information from pipeline logs.
         Queries for Driver Failures, dispatch failures, LOST markings, and job status changes.
-        
+
         Excludes container application failures (exit code 1) from nomad failure categories,
         as these represent application code failures, not infrastructure issues.
 
@@ -1195,7 +1296,9 @@ class CloudWatchAnalyzer:
 
             # Skip if this is a container application failure (exit code 1)
             if self._is_container_application_failure(message):
-                logger.debug(f"Skipping container application failure from nomad failures: {message[:100]}")
+                logger.debug(
+                    f"Skipping container application failure from nomad failures: {message[:100]}"
+                )
                 continue
 
             # Extract job information from message if available
@@ -1240,7 +1343,9 @@ class CloudWatchAnalyzer:
 
             # Skip if this is a container application failure (exit code 1)
             if self._is_container_application_failure(message):
-                logger.debug(f"Skipping container application failure from dispatch failures: {message[:100]}")
+                logger.debug(
+                    f"Skipping container application failure from dispatch failures: {message[:100]}"
+                )
                 continue
 
             job_match = re.search(r"Job\s+([^\s]+)", message)
@@ -1277,7 +1382,9 @@ class CloudWatchAnalyzer:
 
             # Skip if this is a container application failure (exit code 1)
             if self._is_container_application_failure(message):
-                logger.debug(f"Skipping container application failure from lost markings: {message[:100]}")
+                logger.debug(
+                    f"Skipping container application failure from lost markings: {message[:100]}"
+                )
                 continue
 
             job_match = re.search(r"Job\s+([^\s]+)", message)
@@ -1321,7 +1428,9 @@ class CloudWatchAnalyzer:
 
             # Skip if this is a container application failure (exit code 1)
             if self._is_container_application_failure(message):
-                logger.debug(f"Skipping container application failure from status transitions: {message[:100]}")
+                logger.debug(
+                    f"Skipping container application failure from status transitions: {message[:100]}"
+                )
                 continue
 
             job_match = re.search(r"Job\s+([^\s]+)", message)
@@ -1379,45 +1488,46 @@ class CloudWatchAnalyzer:
         """
         Determine if a failure message represents a container application failure
         (exit code 1) rather than a true nomad/infrastructure issue.
-        
+
         Args:
             message: The log message to analyze
-            
+
         Returns:
             True if this is a container application failure, False if it's a nomad issue
         """
         # Check for specific patterns that indicate container application failures
         container_failure_patterns = [
-            r'exit_code=1[^0-9]',  # exit_code=1 (but not 10, 11, etc.)
-            r'Docker container exited with non-zero exit code: 1',
-            r'Task.*failed.*Exit Code: 1',
-            r'container exited.*code 1',
+            r"exit_code=1[^0-9]",  # exit_code=1 (but not 10, 11, etc.)
+            r"Docker container exited with non-zero exit code: 1",
+            r"Task.*failed.*Exit Code: 1",
+            r"container exited.*code 1",
         ]
-        
+
         for pattern in container_failure_patterns:
             if re.search(pattern, message, re.IGNORECASE):
                 return True
-                
+
         # Check for true nomad/infrastructure failure patterns
         nomad_failure_patterns = [
-            r'driver.*crash',
-            r'allocation.*failed.*placement',
-            r'no eligible node',
-            r'resource.*exhaust',
-            r'node.*disconnect',
-            r'driver.*startup.*fail',
-            r'allocation.*restart.*limit',
+            r"driver.*crash",
+            r"allocation.*failed.*placement",
+            r"no eligible node",
+            r"resource.*exhaust",
+            r"node.*disconnect",
+            r"driver.*startup.*fail",
+            r"allocation.*restart.*limit",
         ]
-        
+
         # If it matches nomad patterns but not container patterns, it's a nomad issue
         for pattern in nomad_failure_patterns:
             if re.search(pattern, message, re.IGNORECASE):
                 return False
-                
+
         # If we see "Driver Failure" but also exit code 1, it's likely a container failure
-        if ('Driver Failure' in message and 
-            (re.search(r'exit_code=1[^0-9]', message) or 
-             'Docker container exited with non-zero exit code: 1' in message)):
+        if "Driver Failure" in message and (
+            re.search(r"exit_code=1[^0-9]", message)
+            or "Docker container exited with non-zero exit code: 1" in message
+        ):
             return True
-            
+
         return False
