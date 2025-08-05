@@ -36,7 +36,7 @@ class HTMLGenerator:
         unique_unhandled_exceptions: List[UniqueErrorInfo] = None,
         failed_pipelines: List[FailedPipelineInfo] = None,
     ) -> str:
-        """Generate CloudWatch-focused HTML dashboard from analysis results."""
+        """Generate CloudWatch-focused HTML dashboard from analysis results with proper failure categorization."""
         
         template = self.env.get_template('cloudwatch_dashboard.html')
         
@@ -79,11 +79,14 @@ class HTMLGenerator:
             'nomad_failures': analysis_results.get('nomad_failures', {}),
             'action_items': analysis_results.get('action_items', []),
             
-            # Nomad failure summary counts
+            # Infrastructure failure summary counts (excludes container exit code 1)
             'driver_failures_count': analysis_results.get('driver_failures_count', 0),
             'dispatch_failures_count': analysis_results.get('dispatch_failures_count', 0),
             'timeout_failures_count': analysis_results.get('timeout_failures_count', 0),
             'nomad_affected_jobs_count': analysis_results.get('nomad_affected_jobs_count', 0),
+            
+            # Failure categorization notes for template
+            'failure_categorization_note': 'Application failures represent container exit code failures. Infrastructure failures represent true nomad/driver/node issues.',
             
             # Terminal status analysis counts
             'terminal_status_analyzed_count': analysis_results.get('terminal_status_analyzed_count', 0),

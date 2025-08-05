@@ -638,7 +638,7 @@
       <button class="nav-tab" onclick="showTab('failures')">Failures Analysis</button>
       <button class="nav-tab" onclick="showTab('patterns')">Error Patterns</button>
       <button class="nav-tab" onclick="showTab('infrastructure')">Infrastructure Analysis</button>
-      <button class="nav-tab" onclick="showTab('nomad')">Nomad Failures</button>
+      <button class="nav-tab" onclick="showTab('nomad')">Infrastructure Failures</button>
       <button class="nav-tab" onclick="showTab('actions')">Action Items</button>
     </div>
 
@@ -661,7 +661,7 @@
               Application Failures
               <span class="status-count">{{ status_groups.application_failures|length if status_groups else 0 }}</span>
             </div>
-            <div class="mt-1">{{ "%.1f"|format(summary.failure_rate if summary else 0) }}% of total jobs</div>
+            <div class="mt-1">{{ "%.1f"|format(summary.failure_rate if summary else 0) }}% of total jobs (container exit code failures)</div>
           </div>
 
           <div class="status-card lost">
@@ -669,8 +669,7 @@
               Infrastructure Issues
               <span class="status-count">{{ status_groups.infrastructure_issues|length if status_groups else 0 }}</span>
             </div>
-            <div class="mt-1">{{ "%.1f"|format(summary.infrastructure_failure_rate if summary else 0) }}% of total jobs
-            </div>
+            <div class="mt-1">{{ "%.1f"|format(summary.infrastructure_failure_rate if summary else 0) }}% of total jobs (nomad/node failures)</div>
           </div>
 
           <div class="status-card progress">
@@ -713,10 +712,10 @@
         <div class="status-grid">
           <div class="status-card danger">
             <div class="status-title">
-              Nomad Driver Failures
+              True Infrastructure Failures
               <span class="status-count">{{ driver_failures_count }}</span>
             </div>
-            <div class="mt-1">Critical infrastructure failures detected in pipeline logs</div>
+            <div class="mt-1">Critical nomad/driver failures (excludes container exit code 1)</div>
           </div>
           
           <div class="status-card warning">
@@ -927,17 +926,17 @@
         {% endif %}
       </div>
 
-      <!-- Nomad Failures Tab -->
+      <!-- Infrastructure Failures Tab -->
       <div id="nomad" class="tab-content">
-        <h2>Nomad Failures Analysis</h2>
-        <p class="mb-2">Detailed analysis of Nomad-specific failures extracted from pipeline logs.</p>
+        <h2>Infrastructure Failures Analysis</h2>
+        <p class="mb-2">Detailed analysis of true infrastructure failures extracted from pipeline logs. <strong>Note:</strong> Container application failures (exit code 1) are excluded from this analysis and appear in the "Failures Analysis" tab instead.</p>
 
-        <!-- Nomad Summary Cards -->
+        <!-- Infrastructure Summary Cards -->
         <div class="status-grid mb-4">
           <div class="status-card danger">
-            <div class="status-title">Driver Failures</div>
+            <div class="status-title">True Driver Failures</div>
             <div class="status-number">{{ driver_failures_count }}</div>
-            <div class="status-detail">Critical driver failures detected in logs</div>
+            <div class="status-detail">Infrastructure driver failures (excludes container exit code 1)</div>
           </div>
           <div class="status-card warning">
             <div class="status-title">Dispatch Failures</div>
@@ -952,15 +951,15 @@
           <div class="status-card secondary">
             <div class="status-title">Affected Jobs</div>
             <div class="status-number">{{ nomad_affected_jobs_count }}</div>
-            <div class="status-detail">Total jobs impacted by nomad issues</div>
+            <div class="status-detail">Total jobs impacted by infrastructure issues</div>
           </div>
         </div>
 
-        <!-- Driver Failures -->
+        <!-- True Infrastructure Driver Failures -->
         {% if nomad_failures.driver_failures %}
         <div class="section-header">
-          <h3>Critical Driver Failures</h3>
-          <p>Driver failures indicate serious issues with job execution environment</p>
+          <h3>Critical Infrastructure Driver Failures</h3>
+          <p>These driver failures indicate serious infrastructure issues with job execution environment (container application failures excluded)</p>
         </div>
         
         <div class="error-patterns">

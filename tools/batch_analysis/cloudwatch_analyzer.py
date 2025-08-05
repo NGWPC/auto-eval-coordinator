@@ -101,9 +101,16 @@ class CloudWatchAnalyzer:
                 submitted_streams.add(stream)
 
         logger.info(
-            f"Found {len(submitted_streams)} submitted pipeline streams"
+            f"Found {len(submitted_streams)} total submitted pipeline streams"
         )
-        return submitted_streams
+        
+        # Filter to only the latest attempt for each unique pipeline identity
+        latest_submitted_streams = self._get_latest_pipeline_per_identity(submitted_streams)
+        
+        logger.info(
+            f"After filtering for latest attempts: {len(latest_submitted_streams)} unique pipeline streams"
+        )
+        return latest_submitted_streams
 
     def find_missing_pipelines(self, expected_aois: List[str]) -> List[str]:
         """Find AOIs that were expected but have no corresponding pipeline log streams."""
@@ -165,8 +172,13 @@ class CloudWatchAnalyzer:
         return default
 
     def find_failed_pipelines(self) -> List[FailedPipelineInfo]:
-        """Find pipelines that failed for non-job reasons (missing 'INFO Pipeline SUCCESS' message)."""
-        logger.info("Finding pipelines that failed for non-job reasons...")
+        """
+        Find pipelines that failed for non-job reasons (missing 'INFO Pipeline SUCCESS' message).
+        
+        Note: This method now only considers the latest attempt for each unique pipeline identity.
+        Pipeline restarts are handled by find_submitted_pipelines() which filters to latest attempts.
+        """
+        logger.info("Finding pipelines that failed for non-job reasons (latest attempts only)...")
 
         # Build filter pattern based on whether collection is specified
         if self.config.collection:
@@ -174,7 +186,7 @@ class CloudWatchAnalyzer:
         else:
             stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
 
-        # Get all submitted pipeline streams
+        # Get all submitted pipeline streams (already filtered to latest attempts only)
         submitted_streams = self.find_submitted_pipelines()
 
         if not submitted_streams:
@@ -289,6 +301,90 @@ class CloudWatchAnalyzer:
         if match:
             return match.group(1)
         return "unknown"
+
+    def _extract_pipeline_identity(self, stream: str) -> tuple:
+        """
+        Extract the base identity of a pipeline from its log stream name.
+        
+        Pipeline streams have format: 
+        pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]-TIMESTAMP-HASH
+        
+        Returns: (batch_name, aoi_name, collection) tuple
+        """
+        # Pattern to extract batch_name, aoi_name, and collection from the stream name
+        # All pipelines will always have a collection parameter
+        pattern = r"pipeline/dispatch-\[batch_name=([^,\]]+),aoi_name=([^,\]]+),collection=([^,\]]+)\]"
+        match = re.search(pattern, stream)
+        
+        if match:
+            batch_name = match.group(1)
+            aoi_name = match.group(2)
+            collection = match.group(3)
+            return (batch_name, aoi_name, collection)
+        
+        # Fallback: try to extract just the parts we can identify
+        logger.warning(f"Unable to parse pipeline identity from stream: {stream}")
+        return ("unknown", "unknown", None)
+
+    def _get_latest_pipeline_per_identity(self, streams: Set[str]) -> Set[str]:
+        """
+        Group pipeline streams by their base identity and return only the latest attempt for each.
+        
+        Args:
+            streams: Set of pipeline log stream names
+            
+        Returns:
+            Set of stream names containing only the latest attempt for each unique pipeline identity
+        """
+        if not streams:
+            return set()
+            
+        # Group streams by their base identity
+        identity_to_streams = {}
+        
+        for stream in streams:
+            identity = self._extract_pipeline_identity(stream)
+            if identity not in identity_to_streams:
+                identity_to_streams[identity] = []
+            identity_to_streams[identity].append(stream)
+        
+        # For each identity, find the stream with the latest timestamp
+        latest_streams = set()
+        
+        for identity, stream_list in identity_to_streams.items():
+            if len(stream_list) == 1:
+                # Only one stream for this identity, use it
+                latest_streams.add(stream_list[0])
+            else:
+                # Multiple streams, find the one with the latest timestamp
+                latest_stream = None
+                latest_timestamp = 0
+                
+                for stream in stream_list:
+                    # Extract timestamp from stream name
+                    # Format: pipeline/dispatch-[batch_name=X,aoi_name=Y,collection=Z]-TIMESTAMP-HASH
+                    # All pipelines will always have a collection parameter
+                    timestamp_match = re.search(r"collection=[^\]]+\]-(\d+)-[a-f0-9]+$", stream)
+                    if timestamp_match:
+                        timestamp = int(timestamp_match.group(1))
+                        if timestamp > latest_timestamp:
+                            latest_timestamp = timestamp
+                            latest_stream = stream
+                    else:
+                        # Fallback: if we can't parse timestamp, use the stream name lexicographically
+                        if latest_stream is None or stream > latest_stream:
+                            latest_stream = stream
+                
+                if latest_stream:
+                    latest_streams.add(latest_stream)
+                    logger.debug(f"Selected latest stream for identity {identity}: {latest_stream} from {len(stream_list)} attempts")
+                else:
+                    # Fallback: just pick the first one
+                    latest_streams.add(stream_list[0])
+                    logger.warning(f"Could not determine latest stream for identity {identity}, using first: {stream_list[0]}")
+        
+        logger.info(f"Filtered {len(streams)} pipeline streams down to {len(latest_streams)} latest attempts")
+        return latest_streams
 
     def get_errors_for_failed_jobs_bulk(
         self, failed_job_streams: List[str]
@@ -604,6 +700,8 @@ class CloudWatchAnalyzer:
         failed_jobs = status_groups[
             "application_failures"
         ]  # Only FAILED jobs, not LOST
+        # TEMP DEBUG: Limit to first 50 failed jobs to speed up processing
+        failed_jobs = failed_jobs[:50]
         failed_job_streams = [job["job_log_stream"] for job in failed_jobs]
 
         error_results = {}
@@ -620,12 +718,16 @@ class CloudWatchAnalyzer:
 
         # Step 2.1: Analyze terminal status jobs (STOPPED, CANCELLED, LOST) for detailed failure information
         terminal_jobs = (
-            status_groups["infrastructure_issues"] +  # LOST jobs
-            status_groups["intentional_stops"]  # STOPPED, CANCELLED jobs
+            status_groups["infrastructure_issues"]  # LOST jobs
+            + status_groups["intentional_stops"]  # STOPPED, CANCELLED jobs
         )
+        # TEMP DEBUG: Limit to first 20 terminal jobs to speed up processing
+        terminal_jobs = terminal_jobs[:20]
         terminal_status_details = {}
         if terminal_jobs:
-            terminal_status_details = self.get_terminal_status_details(terminal_jobs)
+            terminal_status_details = self.get_terminal_status_details(
+                terminal_jobs
+            )
 
         # Step 2.2: Extract nomad failure information from pipeline logs
         nomad_failures = self.extract_nomad_failures()
@@ -633,7 +735,8 @@ class CloudWatchAnalyzer:
         # Step 3: Analyze error patterns and create unique error analysis
         error_patterns = defaultdict(list)
 
-        for job in failed_jobs:
+        # TEMP DEBUG: Already limited failed_jobs above, but process only first 30 for pattern analysis
+        for job in failed_jobs[:30]:
             job_stream = job["job_log_stream"]
             error_messages = error_messages_by_stream.get(job_stream, [])
 
@@ -702,25 +805,41 @@ class CloudWatchAnalyzer:
                     "category": "Nomad Driver Failure",
                     "issue": f"{nomad_failures['summary']['total_driver_failures']} driver failures detected in pipeline logs",
                     "recommendation": "Investigate driver failures which indicate issues with job execution environment, resource allocation, or container runtime problems.",
-                    "affected_jobs": nomad_failures["summary"]["total_driver_failures"],
+                    "affected_jobs": nomad_failures["summary"][
+                        "total_driver_failures"
+                    ],
                     "details": f"Affected job count: {len(set([f['job_id'] for f in nomad_failures['driver_failures']]))}",
                 }
             )
 
         # High-priority: Infrastructure issues (LOST jobs) with enhanced analysis
         if len(status_groups["infrastructure_issues"]) > 0:
-            lost_with_driver_failures = sum(1 for job in status_groups["infrastructure_issues"] 
-                                          if terminal_status_details.get(job["job_log_stream"], {}).get("failure_type") == "driver_failure")
-            lost_with_timeouts = sum(1 for job in status_groups["infrastructure_issues"] 
-                                   if terminal_status_details.get(job["job_log_stream"], {}).get("failure_type") == "infrastructure_timeout")
-            
+            lost_with_driver_failures = sum(
+                1
+                for job in status_groups["infrastructure_issues"]
+                if terminal_status_details.get(job["job_log_stream"], {}).get(
+                    "failure_type"
+                )
+                == "driver_failure"
+            )
+            lost_with_timeouts = sum(
+                1
+                for job in status_groups["infrastructure_issues"]
+                if terminal_status_details.get(job["job_log_stream"], {}).get(
+                    "failure_type"
+                )
+                == "infrastructure_timeout"
+            )
+
             action_items.append(
                 {
                     "priority": "HIGH",
                     "category": "Infrastructure",
                     "issue": f"{len(status_groups['infrastructure_issues'])} jobs lost due to infrastructure issues",
                     "recommendation": "Check Nomad cluster health, node availability, and timeout settings. Review driver failures and timeout patterns for root cause analysis.",
-                    "affected_jobs": len(status_groups["infrastructure_issues"]),
+                    "affected_jobs": len(
+                        status_groups["infrastructure_issues"]
+                    ),
                     "details": f"Driver failures: {lost_with_driver_failures}, Timeouts: {lost_with_timeouts}, Other: {len(status_groups['infrastructure_issues']) - lost_with_driver_failures - lost_with_timeouts}",
                 }
             )
@@ -740,13 +859,31 @@ class CloudWatchAnalyzer:
 
         # Medium-priority: Intentional stops (STOPPED, CANCELLED) with analysis
         if len(status_groups["intentional_stops"]) > 0:
-            stopped_count = len([job for job in status_groups["intentional_stops"] if job["job_status"] == "STOPPED"])
-            cancelled_count = len([job for job in status_groups["intentional_stops"] if job["job_status"] == "CANCELLED"])
-            
+            stopped_count = len(
+                [
+                    job
+                    for job in status_groups["intentional_stops"]
+                    if job["job_status"] == "STOPPED"
+                ]
+            )
+            cancelled_count = len(
+                [
+                    job
+                    for job in status_groups["intentional_stops"]
+                    if job["job_status"] == "CANCELLED"
+                ]
+            )
+
             # Check if we have detailed reasons for these jobs
-            with_reasons = sum(1 for job in status_groups["intentional_stops"] 
-                             if terminal_status_details.get(job["job_log_stream"], {}).get("failure_reason", "Unknown") != "Unknown reason")
-            
+            with_reasons = sum(
+                1
+                for job in status_groups["intentional_stops"]
+                if terminal_status_details.get(job["job_log_stream"], {}).get(
+                    "failure_reason", "Unknown"
+                )
+                != "Unknown reason"
+            )
+
             action_items.append(
                 {
                     "priority": "MEDIUM",
@@ -804,34 +941,38 @@ class CloudWatchAnalyzer:
         """
         Extract detailed information from both job and pipeline logs for terminal status jobs.
         Covers STOPPED, CANCELLED, and LOST jobs with context from logs.
-        
+
         Args:
             jobs: List of job dictionaries with terminal statuses
-            
+
         Returns:
             Dictionary with detailed information for each job including failure reasons
         """
         if not jobs:
             return {}
-            
-        logger.info(f"Extracting terminal status details for {len(jobs)} jobs...")
-        
+
+        logger.info(
+            f"Extracting terminal status details for {len(jobs)} jobs..."
+        )
+
         terminal_details = {}
-        
+
         # Process jobs in chunks to avoid query size limits
         chunk_size = 20
-        
+
         for i in range(0, len(jobs), chunk_size):
-            chunk = jobs[i:i + chunk_size]
-            
+            chunk = jobs[i : i + chunk_size]
+
             # Get job log streams for this chunk
             job_streams = [job["job_log_stream"] for job in chunk]
             pipeline_streams = [job["pipeline_log_stream"] for job in chunk]
-            
+
             # Query job logs for error details
             if job_streams:
-                job_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in job_streams])
-                
+                job_streams_filter = " or ".join(
+                    [f'@logStream = "{stream}"' for stream in job_streams]
+                )
+
                 job_errors_query = f"""
                 fields @timestamp, @logStream, @message
                 | filter ({job_streams_filter})
@@ -839,66 +980,72 @@ class CloudWatchAnalyzer:
                 | sort @logStream, @timestamp desc
                 | limit 100
                 """
-                
-                job_error_results = self.run_query(self.config.job_log_group, job_errors_query)
-                
+
+                job_error_results = self.run_query(
+                    self.config.job_log_group, job_errors_query
+                )
+
                 # Process job error results
                 job_errors_by_stream = {}
                 for result in job_error_results:
                     stream = self._get_field_value(result, "@logStream")
                     message = self._get_field_value(result, "@message")
                     timestamp = self._get_field_value(result, "@timestamp")
-                    
+
                     if stream not in job_errors_by_stream:
                         job_errors_by_stream[stream] = []
-                    job_errors_by_stream[stream].append({
-                        "timestamp": timestamp,
-                        "message": message
-                    })
-            
+                    job_errors_by_stream[stream].append(
+                        {"timestamp": timestamp, "message": message}
+                    )
+
             # Query pipeline logs for status change context
             if pipeline_streams:
-                pipeline_streams_filter = " or ".join([f'@logStream = "{stream}"' for stream in pipeline_streams])
-                
+                pipeline_streams_filter = " or ".join(
+                    [f'@logStream = "{stream}"' for stream in pipeline_streams]
+                )
+
                 pipeline_context_query = f"""
                 fields @timestamp, @logStream, @message
                 | filter ({pipeline_streams_filter})
-                | filter @message like /JobStatus\.(STOPPED|CANCELLED|LOST)|marking.*LOST|Driver Failure/
+                | filter @message like /JobStatus\\.(STOPPED|CANCELLED|LOST)|marking.*LOST|Driver Failure/
                 | sort @logStream, @timestamp desc
                 | limit 100
                 """
-                
-                pipeline_context_results = self.run_query(self.config.pipeline_log_group, pipeline_context_query)
-                
+
+                pipeline_context_results = self.run_query(
+                    self.config.pipeline_log_group, pipeline_context_query
+                )
+
                 # Process pipeline context results
                 pipeline_context_by_stream = {}
                 for result in pipeline_context_results:
                     stream = self._get_field_value(result, "@logStream")
                     message = self._get_field_value(result, "@message")
                     timestamp = self._get_field_value(result, "@timestamp")
-                    
+
                     if stream not in pipeline_context_by_stream:
                         pipeline_context_by_stream[stream] = []
-                    pipeline_context_by_stream[stream].append({
-                        "timestamp": timestamp,
-                        "message": message
-                    })
-            
+                    pipeline_context_by_stream[stream].append(
+                        {"timestamp": timestamp, "message": message}
+                    )
+
             # Combine information for each job in this chunk
             for job in chunk:
                 job_stream = job["job_log_stream"]
                 pipeline_stream = job["pipeline_log_stream"]
                 job_status = job["job_status"]
-                
+
                 # Extract failure reason based on status and available context
                 failure_reason = "Unknown reason"
                 failure_type = "unknown"
                 nomad_details = {}
-                
+
                 # Get context from logs
                 job_errors = job_errors_by_stream.get(job_stream, [])
-                pipeline_context = pipeline_context_by_stream.get(pipeline_stream, [])
-                
+                pipeline_context = pipeline_context_by_stream.get(
+                    pipeline_stream, []
+                )
+
                 # Analyze based on job status
                 if job_status == "STOPPED":
                     failure_type = "intentional_stop"
@@ -910,7 +1057,7 @@ class CloudWatchAnalyzer:
                                 break
                         else:
                             failure_reason = "Job was intentionally stopped"
-                    
+
                 elif job_status == "CANCELLED":
                     failure_type = "intentional_cancel"
                     if pipeline_context:
@@ -920,58 +1067,74 @@ class CloudWatchAnalyzer:
                                 break
                         else:
                             failure_reason = "Job was cancelled"
-                    
+
                 elif job_status == "LOST":
                     failure_type = "infrastructure_timeout"
-                    
+
                     # Check for specific LOST reasons in pipeline logs
                     driver_failure = False
                     timeout_reason = False
-                    
+
                     for ctx in pipeline_context:
                         msg = ctx.get("message", "")
                         if "Driver Failure" in msg:
                             failure_type = "driver_failure"
-                            failure_reason = f"Driver failure detected: {msg[:200]}"
+                            failure_reason = (
+                                f"Driver failure detected: {msg[:200]}"
+                            )
                             driver_failure = True
                             nomad_details["driver_failure"] = msg
                             break
                         elif "marking" in msg.lower() and "lost" in msg.lower():
                             if "timeout" in msg.lower():
-                                failure_reason = f"Job lost due to timeout: {msg[:200]}"
+                                failure_reason = (
+                                    f"Job lost due to timeout: {msg[:200]}"
+                                )
                                 timeout_reason = True
                                 nomad_details["timeout_reason"] = msg
                             else:
-                                failure_reason = f"Job marked as LOST: {msg[:200]}"
+                                failure_reason = (
+                                    f"Job marked as LOST: {msg[:200]}"
+                                )
                                 nomad_details["lost_reason"] = msg
-                    
+
                     if not driver_failure and not timeout_reason:
                         failure_reason = "Job lost due to infrastructure issues (timeout or node failure)"
-                
+
                 # Use nomad error pattern extraction for additional context
-                all_messages = [err["message"] for err in job_errors] + [ctx["message"] for ctx in pipeline_context]
+                all_messages = [err["message"] for err in job_errors] + [
+                    ctx["message"] for ctx in pipeline_context
+                ]
                 if all_messages:
                     for message in all_messages[:3]:  # Check first few messages
-                        nomad_pattern, nomad_type = self.error_extractor.extract_nomad_error_pattern(message)
+                        nomad_pattern, nomad_type = (
+                            self.error_extractor.extract_nomad_error_pattern(
+                                message
+                            )
+                        )
                         if nomad_type.startswith("nomad_"):
                             nomad_details["pattern"] = nomad_pattern
                             nomad_details["type"] = nomad_type
                             if "unknown" in failure_reason.lower():
                                 failure_reason = f"Nomad issue detected: {nomad_pattern[:150]}"
                             break
-                
+
                 terminal_details[job_stream] = {
                     "job_status": job_status,
                     "failure_type": failure_type,
                     "failure_reason": failure_reason,
                     "nomad_error_details": nomad_details,
                     "job_errors": job_errors[:5],  # Limit to first 5 errors
-                    "pipeline_context": pipeline_context[:5],  # Limit to first 5 context messages
+                    "pipeline_context": pipeline_context[
+                        :5
+                    ],  # Limit to first 5 context messages
                     "pipeline_log_stream": pipeline_stream,
-                    "timestamp": job.get("timestamp")
+                    "timestamp": job.get("timestamp"),
                 }
-        
-        logger.info(f"Extracted terminal status details for {len(terminal_details)} jobs")
+
+        logger.info(
+            f"Extracted terminal status details for {len(terminal_details)} jobs"
+        )
         return terminal_details
 
     def extract_nomad_failures(self) -> Dict[str, Any]:
@@ -979,17 +1142,22 @@ class CloudWatchAnalyzer:
         Extract nomad failure information from pipeline logs.
         Queries for Driver Failures, dispatch failures, LOST markings, and job status changes.
         
+        Excludes container application failures (exit code 1) from nomad failure categories,
+        as these represent application code failures, not infrastructure issues.
+
         Returns:
             Dictionary with categorized nomad failure information
         """
-        logger.info("Extracting nomad failure information from pipeline logs...")
-        
+        logger.info(
+            "Extracting nomad failure information from pipeline logs (excluding container exit code 1 failures)..."
+        )
+
         # Build filter pattern based on whether collection is specified
         if self.config.collection:
             stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*collection={self.config.collection}.*\\]/"
         else:
             stream_filter = f"/pipeline\\/dispatch-\\[batch_name={self.config.batch_name},.*\\]/"
-        
+
         nomad_failures = {
             "driver_failures": [],
             "dispatch_failures": [],
@@ -1001,46 +1169,57 @@ class CloudWatchAnalyzer:
                 "total_dispatch_failures": 0,
                 "total_lost_markings": 0,
                 "total_timeout_failures": 0,
-                "affected_jobs": set()
-            }
+                "affected_jobs": set(),
+            },
         }
-        
-        # Query for Driver Failures
+
+        # Query for Driver Failures (exclude container exit code 1 failures)
         driver_failure_query = f"""
         fields @timestamp, @logStream, @message
         | filter @logStream like {stream_filter}
         | filter @message like /Driver Failure/
+        | filter @message not like /exit_code=1[^0-9]/
+        | filter @message not like /Docker container exited with non-zero exit code: 1/
         | sort @timestamp desc
         | limit 200
         """
-        
-        driver_results = self.run_query(self.config.pipeline_log_group, driver_failure_query)
-        
+
+        driver_results = self.run_query(
+            self.config.pipeline_log_group, driver_failure_query
+        )
+
         for result in driver_results:
             timestamp = self._get_field_value(result, "@timestamp")
             pipeline_stream = self._get_field_value(result, "@logStream")
             message = self._get_field_value(result, "@message")
-            
+
+            # Skip if this is a container application failure (exit code 1)
+            if self._is_container_application_failure(message):
+                logger.debug(f"Skipping container application failure from nomad failures: {message[:100]}")
+                continue
+
             # Extract job information from message if available
-            job_match = re.search(r'Job\s+([^\s]+)', message)
+            job_match = re.search(r"Job\s+([^\s]+)", message)
             job_id = job_match.group(1) if job_match else "unknown"
-            
+
             # Extract allocation ID if available
-            alloc_match = re.search(r'allocation\s+([a-f0-9-]+)', message, re.IGNORECASE)
+            alloc_match = re.search(
+                r"allocation\s+([a-f0-9-]+)", message, re.IGNORECASE
+            )
             alloc_id = alloc_match.group(1) if alloc_match else "unknown"
-            
+
             failure_info = {
                 "timestamp": timestamp,
                 "pipeline_log_stream": pipeline_stream,
                 "job_id": job_id,
                 "allocation_id": alloc_id,
                 "message": message,
-                "failure_type": "driver_failure"
+                "failure_type": "driver_failure",
             }
-            
+
             nomad_failures["driver_failures"].append(failure_info)
             nomad_failures["summary"]["affected_jobs"].add(job_id)
-        
+
         # Query for dispatch failures
         dispatch_failure_query = f"""
         fields @timestamp, @logStream, @message
@@ -1049,28 +1228,35 @@ class CloudWatchAnalyzer:
         | sort @timestamp desc
         | limit 100
         """
-        
-        dispatch_results = self.run_query(self.config.pipeline_log_group, dispatch_failure_query)
-        
+
+        dispatch_results = self.run_query(
+            self.config.pipeline_log_group, dispatch_failure_query
+        )
+
         for result in dispatch_results:
             timestamp = self._get_field_value(result, "@timestamp")
             pipeline_stream = self._get_field_value(result, "@logStream")
             message = self._get_field_value(result, "@message")
-            
-            job_match = re.search(r'Job\s+([^\s]+)', message)
+
+            # Skip if this is a container application failure (exit code 1)
+            if self._is_container_application_failure(message):
+                logger.debug(f"Skipping container application failure from dispatch failures: {message[:100]}")
+                continue
+
+            job_match = re.search(r"Job\s+([^\s]+)", message)
             job_id = job_match.group(1) if job_match else "unknown"
-            
+
             failure_info = {
                 "timestamp": timestamp,
                 "pipeline_log_stream": pipeline_stream,
                 "job_id": job_id,
                 "message": message,
-                "failure_type": "dispatch_failure"
+                "failure_type": "dispatch_failure",
             }
-            
+
             nomad_failures["dispatch_failures"].append(failure_info)
             nomad_failures["summary"]["affected_jobs"].add(job_id)
-        
+
         # Query for LOST markings
         lost_marking_query = f"""
         fields @timestamp, @logStream, @message
@@ -1079,86 +1265,159 @@ class CloudWatchAnalyzer:
         | sort @timestamp desc
         | limit 200
         """
-        
-        lost_results = self.run_query(self.config.pipeline_log_group, lost_marking_query)
-        
+
+        lost_results = self.run_query(
+            self.config.pipeline_log_group, lost_marking_query
+        )
+
         for result in lost_results:
             timestamp = self._get_field_value(result, "@timestamp")
             pipeline_stream = self._get_field_value(result, "@logStream")
             message = self._get_field_value(result, "@message")
-            
-            job_match = re.search(r'Job\s+([^\s]+)', message)
+
+            # Skip if this is a container application failure (exit code 1)
+            if self._is_container_application_failure(message):
+                logger.debug(f"Skipping container application failure from lost markings: {message[:100]}")
+                continue
+
+            job_match = re.search(r"Job\s+([^\s]+)", message)
             job_id = job_match.group(1) if job_match else "unknown"
-            
+
             # Determine if this is a timeout-related LOST
             is_timeout = "timeout" in message.lower()
-            
+
             failure_info = {
                 "timestamp": timestamp,
                 "pipeline_log_stream": pipeline_stream,
                 "job_id": job_id,
                 "message": message,
                 "failure_type": "lost_marking",
-                "is_timeout": is_timeout
+                "is_timeout": is_timeout,
             }
-            
+
             nomad_failures["lost_markings"].append(failure_info)
             nomad_failures["summary"]["affected_jobs"].add(job_id)
-            
+
             if is_timeout:
                 nomad_failures["timeout_failures"].append(failure_info)
-        
+
         # Query for job status transitions (for context)
         status_transition_query = f"""
         fields @timestamp, @logStream, @message
         | filter @logStream like {stream_filter}
-        | filter @message like /JobStatus\.(STOPPED|CANCELLED|LOST|FAILED)/
+        | filter @message like /JobStatus\\.(STOPPED|CANCELLED|LOST|FAILED)/
         | sort @timestamp desc
         | limit 300
         """
-        
-        transition_results = self.run_query(self.config.pipeline_log_group, status_transition_query)
-        
+
+        transition_results = self.run_query(
+            self.config.pipeline_log_group, status_transition_query
+        )
+
         for result in transition_results:
             timestamp = self._get_field_value(result, "@timestamp")
             pipeline_stream = self._get_field_value(result, "@logStream")
             message = self._get_field_value(result, "@message")
-            
-            job_match = re.search(r'Job\s+([^\s]+)', message)
+
+            # Skip if this is a container application failure (exit code 1)
+            if self._is_container_application_failure(message):
+                logger.debug(f"Skipping container application failure from status transitions: {message[:100]}")
+                continue
+
+            job_match = re.search(r"Job\s+([^\s]+)", message)
             job_id = job_match.group(1) if job_match else "unknown"
-            
+
             # Extract status from message
-            status_match = re.search(r'JobStatus\.(\w+)', message)
+            status_match = re.search(r"JobStatus\.(\w+)", message)
             status = status_match.group(1) if status_match else "unknown"
-            
+
             transition_info = {
                 "timestamp": timestamp,
                 "pipeline_log_stream": pipeline_stream,
                 "job_id": job_id,
                 "status": status,
                 "message": message,
-                "failure_type": "status_transition"
+                "failure_type": "status_transition",
             }
-            
+
             nomad_failures["status_transitions"].append(transition_info)
             nomad_failures["summary"]["affected_jobs"].add(job_id)
-        
+
         # Update summary counts
-        nomad_failures["summary"]["total_driver_failures"] = len(nomad_failures["driver_failures"])
-        nomad_failures["summary"]["total_dispatch_failures"] = len(nomad_failures["dispatch_failures"])
-        nomad_failures["summary"]["total_lost_markings"] = len(nomad_failures["lost_markings"])
-        nomad_failures["summary"]["total_timeout_failures"] = len(nomad_failures["timeout_failures"])
-        nomad_failures["summary"]["total_affected_jobs"] = len(nomad_failures["summary"]["affected_jobs"])
-        
+        nomad_failures["summary"]["total_driver_failures"] = len(
+            nomad_failures["driver_failures"]
+        )
+        nomad_failures["summary"]["total_dispatch_failures"] = len(
+            nomad_failures["dispatch_failures"]
+        )
+        nomad_failures["summary"]["total_lost_markings"] = len(
+            nomad_failures["lost_markings"]
+        )
+        nomad_failures["summary"]["total_timeout_failures"] = len(
+            nomad_failures["timeout_failures"]
+        )
+        nomad_failures["summary"]["total_affected_jobs"] = len(
+            nomad_failures["summary"]["affected_jobs"]
+        )
+
         # Convert set to list for JSON serialization
-        nomad_failures["summary"]["affected_jobs"] = list(nomad_failures["summary"]["affected_jobs"])
-        
+        nomad_failures["summary"]["affected_jobs"] = list(
+            nomad_failures["summary"]["affected_jobs"]
+        )
+
         logger.info(
-            f"Extracted nomad failures: {nomad_failures['summary']['total_driver_failures']} driver failures, "
+            f"Extracted nomad failures (excluding container exit code 1): {nomad_failures['summary']['total_driver_failures']} driver failures, "
             f"{nomad_failures['summary']['total_dispatch_failures']} dispatch failures, "
             f"{nomad_failures['summary']['total_lost_markings']} lost markings, "
             f"{nomad_failures['summary']['total_timeout_failures']} timeout failures, "
             f"affecting {nomad_failures['summary']['total_affected_jobs']} jobs"
         )
-        
+
         return nomad_failures
+
+    def _is_container_application_failure(self, message: str) -> bool:
+        """
+        Determine if a failure message represents a container application failure
+        (exit code 1) rather than a true nomad/infrastructure issue.
+        
+        Args:
+            message: The log message to analyze
+            
+        Returns:
+            True if this is a container application failure, False if it's a nomad issue
+        """
+        # Check for specific patterns that indicate container application failures
+        container_failure_patterns = [
+            r'exit_code=1[^0-9]',  # exit_code=1 (but not 10, 11, etc.)
+            r'Docker container exited with non-zero exit code: 1',
+            r'Task.*failed.*Exit Code: 1',
+            r'container exited.*code 1',
+        ]
+        
+        for pattern in container_failure_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return True
+                
+        # Check for true nomad/infrastructure failure patterns
+        nomad_failure_patterns = [
+            r'driver.*crash',
+            r'allocation.*failed.*placement',
+            r'no eligible node',
+            r'resource.*exhaust',
+            r'node.*disconnect',
+            r'driver.*startup.*fail',
+            r'allocation.*restart.*limit',
+        ]
+        
+        # If it matches nomad patterns but not container patterns, it's a nomad issue
+        for pattern in nomad_failure_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return False
+                
+        # If we see "Driver Failure" but also exit code 1, it's likely a container failure
+        if ('Driver Failure' in message and 
+            (re.search(r'exit_code=1[^0-9]', message) or 
+             'Docker container exited with non-zero exit code: 1' in message)):
+            return True
+            
+        return False

@@ -126,14 +126,20 @@ class ErrorPatternExtractor:
         """
         Extract nomad-specific error patterns from log messages.
         
+        Excludes container application failures (exit code 1) from nomad categorization.
+        
         Returns:
             Tuple of (error_pattern, error_type)
         """
-        # Nomad-specific error patterns
+        # First check if this is a container application failure (exit code 1)
+        if self._is_container_application_failure(message):
+            return self.extract_raw_error_pattern(message)
+        
+        # True nomad-specific error patterns (infrastructure issues)
         nomad_patterns = [
-            # Driver failures
-            (r'Driver Failure.*?(\w+)', 'driver_failure'),
-            (r'driver.*?failure.*?(\w+)', 'driver_failure'),
+            # Driver failures (excluding container exit code 1)
+            (r'Driver Failure.*?(?!.*exit_code=1[^0-9]).*?(\w+)', 'driver_failure'),
+            (r'driver.*?failure.*?(?!.*exit_code=1[^0-9]).*?(\w+)', 'driver_failure'),
             (r'Failed to start task.*?driver', 'driver_start_failure'),
             
             # Allocation failures
@@ -157,10 +163,10 @@ class ErrorPatternExtractor:
             (r'job.*?timeout', 'job_timeout'),
             (r'allocation.*?timeout', 'allocation_timeout'),
             
-            # Status transitions
-            (r'JobStatus.*?LOST.*?reason', 'job_status_lost'),
-            (r'JobStatus.*?STOPPED.*?reason', 'job_status_stopped'),
-            (r'JobStatus.*?CANCELLED.*?reason', 'job_status_cancelled'),
+            # Status transitions (exclude container exit code 1)
+            (r'JobStatus.*?LOST.*?reason(?!.*exit_code=1[^0-9])', 'job_status_lost'),
+            (r'JobStatus.*?STOPPED.*?reason(?!.*exit_code=1[^0-9])', 'job_status_stopped'),
+            (r'JobStatus.*?CANCELLED.*?reason(?!.*exit_code=1[^0-9])', 'job_status_cancelled'),
         ]
         
         # Try to match nomad-specific patterns first
@@ -176,6 +182,53 @@ class ErrorPatternExtractor:
         
         # Fallback to regular error pattern extraction
         return self.extract_raw_error_pattern(message)
+    
+    def _is_container_application_failure(self, message: str) -> bool:
+        """
+        Determine if a failure message represents a container application failure
+        (exit code 1) rather than a true nomad/infrastructure issue.
+        
+        Args:
+            message: The log message to analyze
+            
+        Returns:
+            True if this is a container application failure, False if it's a nomad issue
+        """
+        # Check for specific patterns that indicate container application failures
+        container_failure_patterns = [
+            r'exit_code=1[^0-9]',  # exit_code=1 (but not 10, 11, etc.)
+            r'Docker container exited with non-zero exit code: 1',
+            r'Task.*failed.*Exit Code: 1',
+            r'container exited.*code 1',
+        ]
+        
+        for pattern in container_failure_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return True
+                
+        # Check for true nomad/infrastructure failure patterns
+        nomad_failure_patterns = [
+            r'driver.*crash',
+            r'allocation.*failed.*placement', 
+            r'no eligible node',
+            r'resource.*exhaust',
+            r'node.*disconnect',
+            r'driver.*startup.*fail',
+            r'allocation.*restart.*limit',
+        ]
+        
+        # If it matches nomad patterns but not container patterns, it's a nomad issue
+        for pattern in nomad_failure_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                return False
+                
+        # If we see "Driver Failure" but also exit code 1, it's likely a container failure
+        if ('Driver Failure' in message and 
+            (re.search(r'exit_code=1[^0-9]', message) or 
+             'Docker container exited with non-zero exit code: 1' in message)):
+            return True
+            
+        return False
 
     def group_similar_errors(self, error_messages: List[str]) -> Dict[str, List[str]]:
         """
