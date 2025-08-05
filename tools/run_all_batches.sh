@@ -58,8 +58,10 @@ echo "Processing ${#RESOLUTIONS[@]} resolutions x ${#COLLECTIONS[@]} collections
 echo "Timestamp: $TIMESTAMP"
 echo ""
 
-# Start background Nomad garbage collection
-start_nomad_gc
+# Start background Nomad garbage collection with log file path
+MEMORY_LOG_FILE="$REPO_ROOT/nomad_memory_usage_${TIMESTAMP}.log"
+echo "Memory usage will be logged to: $MEMORY_LOG_FILE"
+start_nomad_gc "$MEMORY_LOG_FILE"
 
 for resolution in "${RESOLUTIONS[@]}"; do
     echo "=== Processing Resolution: ${resolution}m ==="

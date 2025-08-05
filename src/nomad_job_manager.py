@@ -232,7 +232,7 @@ class NomadJobManager:
             allocations = await self.api.get_allocations(tracker.job_id)
 
             time_since_dispatch = time.time() - tracker.dispatch_time
-            if not allocations and time_since_dispatch > 300:  # 5 mins
+            if not allocations and time_since_dispatch > 1800:  # 30 mins
                 logger.warning(
                     f"No allocations found for job {tracker.job_id} after 5 minutes, marking as LOST."
                 )
@@ -265,29 +265,6 @@ class NomadJobManager:
             logger.warning(
                 f"Unexpected error while polling for job {tracker.job_id}: {e}"
             )
-
-    async def get_job_status(self, job_id: str) -> Dict[str, Any]:
-        """Gets the current status of a job, from memory or by polling Nomad."""
-        if job_id in self._active_jobs:
-            t = self._active_jobs[job_id]
-            return {
-                "job_id": job_id,
-                "status": t.status.value,
-                "allocation_id": t.allocation_id,
-                "exit_code": t.exit_code,
-            }
-        try:
-            job = await self.api.get_job(job_id)
-            return {
-                "job_id": job_id,
-                "status": NOMAD_STATUS_MAP.get(
-                    job.get("Status", "").lower(), JobStatus.UNKNOWN
-                ).value,
-            }
-        except Exception as e:
-            raise JobNotFoundError(
-                f"Job {job_id} not found or API error: {e}"
-            ) from e
 
     async def _update_tracker_from_allocation(
         self, tracker: JobTracker, allocation: Dict[str, Any]
