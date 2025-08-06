@@ -234,7 +234,7 @@ class NomadJobManager:
             time_since_dispatch = time.time() - tracker.dispatch_time
             if not allocations and time_since_dispatch > 1800:  # 30 mins
                 logger.warning(
-                    f"No allocations found for job {tracker.job_id} after 5 minutes, marking as LOST."
+                    f"No allocations found for job {tracker.job_id} after 30 minutes, marking as LOST."
                 )
                 tracker.status = JobStatus.LOST
                 tracker.error = Exception(

@@ -25,9 +25,8 @@ job "agreement_maker" {
     }
 
     restart {
-      attempts = 0        # Try N times on the same node
-      interval = "1m"    # Within an N minute window. Needs to be slightly longer than attempts * delay
-      delay    = "1m"    # Wait 2m between attempts
+      attempts = 3        # Try N times on the same node
+      delay    = "15s"    # Wait between attempts
       mode     = "fail"   # Fail after attempts exhausted
     }
 
