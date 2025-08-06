@@ -23,9 +23,9 @@ job "pipeline" {
 
   group "pipeline-coordinator" {
     reschedule {
-      attempts = 1 # Only attempt to reschedule once
+      attempts = 2 # Only attempt to reschedule twice otherwise will rerun broken pipelines too many times
       interval = "24h"
-      delay = "3m"
+      delay = "4m"
       delay_function = "constant"
       unlimited = false
     }
