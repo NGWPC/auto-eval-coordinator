@@ -3,7 +3,7 @@
 ## Nomad Memory Monitoring and Garbage Collection Script
 
 ## This script monitors Nomad memory usage and triggers garbage collection when needed. Need to change this if you change you server instance type!
-TOTAL_SYSTEM_GIB=94
+TOTAL_SYSTEM_GIB=70
 
 # The percentage of total system memory you want to RESERVE for the OS. Set this conservatively.
 RESERVATION_PERCENTAGE=20

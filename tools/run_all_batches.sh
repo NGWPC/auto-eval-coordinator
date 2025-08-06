@@ -31,7 +31,7 @@ declare -a COLLECTIONS=("ble-collection" "nws-fim-collection" "ripple-fim-collec
 
 # Space-separated list of completed runs in format "collection:resolution"
 # Example: COMPLETED="ble-collection:10 nws-fim-collection:3"
-COMPLETED=""
+COMPLETED="ble-collection:10"
 
 # Generate timestamp in format: YYYY-MM-DD-HH (e.g., 2025-08-01-14 for 2PM on Aug 1, 2025)
 TIMESTAMP=$(date +"%Y-%m-%d-%H")
@@ -91,7 +91,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         fi
         
         # Build the submit_stac_batch.py command
-        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 150" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy.
+        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 150" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy until Cloudwatch Log quota increased
         
         # Get user confirmation and execute
         if confirm_command "$submit_cmd"; then
@@ -127,6 +127,17 @@ for resolution in "${RESOLUTIONS[@]}"; do
             else
                 echo "Reports generated for $collection at: $collection_reports_dir"
                 echo "View HTML dashboard in: $collection_reports_dir/"
+            fi
+        fi
+        
+        echo "--- Checking Job Exit Codes before Purge ---"
+        check_exit_codes_cmd="$REPO_ROOT/check_nomad_jobs.sh"
+        
+        if confirm_command "$check_exit_codes_cmd"; then
+            echo "Checking for non-standard exit codes..."
+            eval $check_exit_codes_cmd
+            if [[ $? -ne 0 ]]; then
+                echo "Warning: Exit code check failed"
             fi
         fi
         
