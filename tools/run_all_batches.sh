@@ -107,10 +107,12 @@ for resolution in "${RESOLUTIONS[@]}"; do
             continue
         fi
         
-        echo "Running update_aws_creds.sh..."
-        update_aws_creds.sh cloudwatch
-        if [[ $? -ne 0 ]]; then
-            echo "Warning: update_aws_creds.sh failed"
+        if confirm_command "update_aws_creds.sh cloudwatch"; then
+            echo "Running update_aws_creds.sh..."
+            update_aws_creds.sh cloudwatch
+            if [[ $? -ne 0 ]]; then
+                echo "Warning: update_aws_creds.sh failed"
+            fi
         fi
         
         echo "--- Generating Report for $collection at ${resolution}m ---"
