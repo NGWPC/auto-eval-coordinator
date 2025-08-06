@@ -27,11 +27,10 @@ job "fim_mosaicker" {
       attempts = 0 # this needs to only be 0 re-attempts or will mess up pipeline job tracking
     }
 
-    # This restart block is configured like this to spread out the load on cloudwatch when it is under stress
     restart {
-      attempts = 5        # Try N times on the same node
-      interval = "20m"    # Within an N minute window. Needs to be slightly longer than attempts * delay
-      delay    = "2m"    # Wait 2m between attempts
+      attempts = 0        # Try N times on the same node
+      interval = "1m"    # Within an N minute window. Needs to be slightly longer than attempts * delay
+      delay    = "1m"    # Wait 2m between attempts
       mode     = "fail"   # Fail after attempts exhausted
     }
 
