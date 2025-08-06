@@ -187,9 +187,23 @@ class NomadJobManager:
         try:
             job_id = await self.api.dispatch_job(job_name, prefix, meta)
         except Exception as e:
-            logger.error(f"Failed to dispatch job {job_name}: {e}")
+            # Extract more detailed error information
+            error_msg = str(e)
+            
+            # Special handling for RetryError that wraps BaseNomadException
+            if "RetryError" in str(type(e)) and "BaseNomadException" in error_msg:
+                # Try to extract the cause from RetryError
+                if hasattr(e, '__cause__') and e.__cause__:
+                    error_msg = f"{error_msg} - Cause: {str(e.__cause__)}"
+                elif hasattr(e, 'last_attempt') and hasattr(e.last_attempt, 'exception'):
+                    # For tenacity RetryError
+                    last_exception = e.last_attempt.exception()
+                    if last_exception:
+                        error_msg = f"RetryError after 3 attempts - Last error: {str(last_exception)}"
+            
+            logger.error(f"Failed to dispatch job {job_name}: {error_msg}")
             raise JobDispatchError(
-                f"Failed to dispatch job {job_name}: {e}"
+                f"Failed to dispatch job {job_name}: {error_msg}"
             ) from e
 
         tracker = JobTracker(
