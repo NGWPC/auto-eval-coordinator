@@ -99,7 +99,7 @@ job "hand_inundator" {
       }
 
       resources {
-        memory = 6000 # Memory in MiB. Hand inundator actually only needs ~1.5 -2 GB of memory but bumping this up to reduce number of jobs Nomad is dealing with to avoid Cloudwatch rate limiting causing job restarts. 
+        memory = 2000 # Memory in MiB. 
       }
 
       logs {
