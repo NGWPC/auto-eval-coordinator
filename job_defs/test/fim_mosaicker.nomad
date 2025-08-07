@@ -96,7 +96,7 @@ job "fim_mosaicker" {
       }
 
       resources {
-        memory = 5000
+        memory = 8000 #Be generous here to avoid OOM
       }
 
       logs {
