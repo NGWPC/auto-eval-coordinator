@@ -321,9 +321,9 @@ def parsed_tags(tag_list):
 
     if tags:
         tags_str = ",".join(f"{k}={v}" for k, v in tags.items())
-        if len(tags_str) > 120:
+        if len(tags_str) > 150:
             raise argparse.ArgumentTypeError(
-                f"Tags exceed 120 character limit ({len(tags_str)} chars): {tags_str}"
+                f"Tags exceed 150 character limit ({len(tags_str)} chars): {tags_str}"
             )
 
     return tags
