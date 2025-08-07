@@ -31,7 +31,7 @@ declare -a COLLECTIONS=("ble-collection" "nws-fim-collection" "ripple-fim-collec
 
 # Space-separated list of completed runs in format "collection:resolution"
 # Example: COMPLETED="ble-collection:10 nws-fim-collection:3"
-COMPLETED="ble-collection:10"
+COMPLETED="ble-collection:10 nws-fim-collection:10"
 
 # Generate timestamp in format: YYYY-MM-DD-HH (e.g., 2025-08-01-14 for 2PM on Aug 1, 2025)
 TIMESTAMP=$(date +"%Y-%m-%d-%H")
@@ -90,8 +90,16 @@ for resolution in "${RESOLUTIONS[@]}"; do
             continue
         fi
         
+        if confirm_command "update_aws_creds.sh fimbucket"; then
+            echo "Running update_aws_creds.sh..."
+            update_aws_creds.sh cloudwatch
+            if [[ $? -ne 0 ]]; then
+                echo "Warning: update_aws_creds.sh failed"
+            fi
+        fi
+        
         # Build the submit_stac_batch.py command
-        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 150" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy until Cloudwatch Log quota increased
+        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 100" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy until Cloudwatch Log quota increased
         
         # Get user confirmation and execute
         if confirm_command "$submit_cmd"; then
