@@ -137,18 +137,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
                 echo "View HTML dashboard in: $collection_reports_dir/"
             fi
         fi
-        
-        echo "--- Checking Job Exit Codes before Purge ---"
-        check_exit_codes_cmd="$REPO_ROOT/check_nomad_jobs.sh"
-        
-        if confirm_command "$check_exit_codes_cmd"; then
-            echo "Checking for non-standard exit codes..."
-            eval $check_exit_codes_cmd
-            if [[ $? -ne 0 ]]; then
-                echo "Warning: Exit code check failed"
-            fi
-        fi
-        
+      
         echo "--- Purging Dispatch Jobs after $collection ---"
         purge_cmd="python tools/purge_dispatch_jobs.py && nomad system gc"
         
