@@ -90,7 +90,7 @@ class CloudWatchAnalyzer:
         query_string: str,
         start_time: int,
         end_time: int,
-        minutes_per_batch: int = 20,
+        minutes_per_batch: int = 10,
     ) -> List[Dict]:
         """
         Execute a CloudWatch Logs Insights query with time-based pagination.
@@ -271,6 +271,7 @@ class CloudWatchAnalyzer:
 
         Note: This method now only considers the latest attempt for each unique pipeline identity.
         Pipeline restarts are handled by find_submitted_pipelines() which filters to latest attempts.
+        Pipelines that exit early due to "No catchments found" are excluded from failures.
         """
         logger.info(
             "Finding pipelines that failed for non-job reasons (latest attempts only)..."
@@ -294,6 +295,7 @@ class CloudWatchAnalyzer:
         )
 
         failed_pipelines = []
+        early_exit_count = 0
 
         # Process streams in chunks to avoid query size limits
         chunk_size = 20
@@ -324,6 +326,26 @@ class CloudWatchAnalyzer:
                 if stream:
                     successful_streams.add(stream)
 
+            # Check for early exit messages (pipelines that exit due to no catchments)
+            early_exit_streams = set()
+            if chunk:
+                streams_filter = " or ".join(
+                    [f'@logStream = "{stream}"' for stream in chunk]
+                )
+                early_exit_query = f"""
+                fields @logStream
+                | filter ({streams_filter}) and @message like /INFO Pipeline exiting early: No catchments found for the given polygon/
+                | stats count() by @logStream
+                """
+
+                early_exit_results = self.run_query(
+                    self.config.pipeline_log_group, early_exit_query
+                )
+                for result in early_exit_results:
+                    stream = self._get_field_value(result, "@logStream")
+                    if stream:
+                        early_exit_streams.add(stream)
+
             # Check for job failures in these streams to distinguish failure types
             job_failure_streams = set()
             if chunk:
@@ -347,6 +369,14 @@ class CloudWatchAnalyzer:
             # Find streams in this chunk that don't have success messages
             for stream in chunk:
                 if stream not in successful_streams:
+                    # Skip streams that have early exit messages (these are not failures)
+                    if stream in early_exit_streams:
+                        logger.debug(
+                            f"Skipping pipeline {stream} - early exit due to no catchments found"
+                        )
+                        early_exit_count += 1
+                        continue
+
                     # Extract AOI name from stream name
                     aoi_name = self._extract_aoi_from_stream(stream)
 
@@ -385,7 +415,8 @@ class CloudWatchAnalyzer:
                     )
 
         logger.info(
-            f"Found {len(failed_pipelines)} pipelines that failed for non-job reasons"
+            f"Found {len(failed_pipelines)} pipelines that failed for non-job reasons "
+            f"(excluded {early_exit_count} early exits due to no catchments)"
         )
         return failed_pipelines
 
@@ -514,6 +545,20 @@ class CloudWatchAnalyzer:
         logger.info(
             f"Retrieving errors for {len(failed_job_streams)} failed jobs in bulk..."
         )
+
+        # Filter out hand_inundator streams. hand_inundator has the most failures and they almost always fail for valid reasons. Will still inspect these jobs but just in the console.
+        original_count = len(failed_job_streams)
+        failed_job_streams = [
+            stream
+            for stream in failed_job_streams
+            if "hand_inundator" not in stream
+        ]
+        filtered_count = original_count - len(failed_job_streams)
+
+        if filtered_count > 0:
+            logger.info(
+                f"Filtered out {filtered_count} hand_inundator log streams from error analysis"
+            )
 
         # Process in chunks to avoid query size limits
         chunk_size = 25

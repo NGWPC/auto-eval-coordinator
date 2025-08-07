@@ -4,7 +4,9 @@ import logging
 from batch_analysis import BatchRunAnalyzer, DebugConfig
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -14,30 +16,68 @@ def main():
     focusing on failures and missing outputs (metrics/agg_metrics files).
     """
 
-    parser = argparse.ArgumentParser(description="Generate comprehensive reports for pipeline batch run analysis")
+    parser = argparse.ArgumentParser(
+        description="Generate comprehensive reports for pipeline batch run analysis"
+    )
 
     # Required arguments
-    parser.add_argument("--batch_name", required=True, help="Name of the batch to analyze (e.g., 'fim100_huc12_10m')")
-    parser.add_argument("--output_dir", required=True, help="Directory to save generated reports")
-    parser.add_argument("--pipeline_log_group", required=True, help="CloudWatch log group for pipeline logs")
-    parser.add_argument("--job_log_group", required=True, help="CloudWatch log group for individual job logs")
+    parser.add_argument(
+        "--batch_name",
+        required=True,
+        help="Name of the batch to analyze (e.g., 'fim100_huc12_10m')",
+    )
+    parser.add_argument(
+        "--output_dir",
+        required=True,
+        help="Directory to save generated reports",
+    )
+    parser.add_argument(
+        "--pipeline_log_group",
+        required=True,
+        help="CloudWatch log group for pipeline logs",
+    )
+    parser.add_argument(
+        "--job_log_group",
+        required=True,
+        help="CloudWatch log group for individual job logs",
+    )
 
     # Optional arguments
     parser.add_argument(
-        "--time_range_days", type=int, default=7, help="Number of days to look back for logs (default: 7)"
+        "--time_range_days",
+        type=int,
+        default=2,
+        help="Number of days to look back for logs (default: 2)",
     )
-    parser.add_argument("--s3_output_root", help="S3 root path for pipeline outputs (for metrics analysis)")
-    parser.add_argument("--html", action="store_true", help="Generate HTML dashboard in addition to CSV reports")
-    parser.add_argument("--aoi_list", help="Path to AOI list file (same format as used by submit_stac_batch.py) for missing pipeline detection")
-    parser.add_argument("--collection", help="Optional: filter results to only a specific collection within the batch")
-    parser.add_argument("--scrape_bucket", action="store_true", help="Only analyze S3 bucket contents, skip CloudWatch logs analysis")
+    parser.add_argument(
+        "--s3_output_root",
+        help="S3 root path for pipeline outputs (for metrics analysis)",
+    )
+    parser.add_argument(
+        "--html",
+        action="store_true",
+        help="Generate HTML dashboard in addition to CSV reports",
+    )
+    parser.add_argument(
+        "--aoi_list",
+        help="Path to AOI list file (same format as used by submit_stac_batch.py) for missing pipeline detection",
+    )
+    parser.add_argument(
+        "--collection",
+        help="Optional: filter results to only a specific collection within the batch",
+    )
+    parser.add_argument(
+        "--scrape_bucket",
+        action="store_true",
+        help="Only analyze S3 bucket contents, skip CloudWatch logs analysis",
+    )
 
     args = parser.parse_args()
 
     # Validate arguments
     if args.s3_output_root and not args.s3_output_root.startswith("s3://"):
         parser.error("s3_output_root must start with 's3://'")
-    
+
     if args.scrape_bucket and not args.s3_output_root:
         parser.error("--scrape_bucket requires --s3_output_root to be provided")
 
@@ -64,7 +104,9 @@ def main():
         print(f"\nBatch Run Analysis Complete!")
         print(f"Batch: {results['batch_name']}")
         print(f"Failed jobs: {results['failed_jobs_count']}")
-        print(f"Failed pipelines (non-job failures): {results['failed_pipelines_count']}")
+        print(
+            f"Failed pipelines (non-job failures): {results['failed_pipelines_count']}"
+        )
         print(f"Unhandled exceptions: {results['unhandled_exceptions_count']}")
         print(f"Submitted pipelines: {results['submitted_pipelines_count']}")
 
@@ -73,8 +115,12 @@ def main():
 
         if "missing_metrics_count" in results:
             print(f"Missing metrics files: {results['missing_metrics_count']}")
-            print(f"Empty/invalid metrics files: {results['empty_metrics_count']}")
-            print(f"Missing agg_metrics files: {results['missing_agg_metrics_count']}")
+            print(
+                f"Empty/invalid metrics files: {results['empty_metrics_count']}"
+            )
+            print(
+                f"Missing agg_metrics files: {results['missing_agg_metrics_count']}"
+            )
 
         if config.collection:
             print(f"\nFiltered by collection: {config.collection}")
@@ -85,10 +131,10 @@ def main():
             # Find the HTML dashboard file in the generated reports
             html_file = None
             for report in results["reports_generated"]:
-                if report.endswith('.html'):
+                if report.endswith(".html"):
                     html_file = report
                     break
-            
+
             if html_file:
                 print(f"📊 View the interactive dashboard: {html_file}")
             else:
