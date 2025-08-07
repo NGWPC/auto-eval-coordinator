@@ -350,6 +350,28 @@ class NomadJobManager:
                             f"Task '{task_name}' failed with exit code {tracker.exit_code}."
                         )
                     tracker.error = Exception("; ".join(failure_details))
+                elif tracker.status == JobStatus.CANCELLED:
+                    tracker.exit_code = task_state.get("ExitCode", 0)
+                    # Search for cancellation reason
+                    cancellation_reason = "Job was cancelled"
+                    for event in reversed(task_state.get("Events", [])):
+                        if event.get("Type") in ["Killing", "Terminated"]:
+                            reason = event.get("DisplayMessage", "")
+                            if reason:
+                                cancellation_reason = f"Job cancelled: {reason}"
+                                break
+                    tracker.error = Exception(cancellation_reason)
+                elif tracker.status == JobStatus.STOPPED:
+                    tracker.exit_code = task_state.get("ExitCode", 0)
+                    # Search for stop reason
+                    stop_reason = "Job was stopped"
+                    for event in reversed(task_state.get("Events", [])):
+                        if event.get("Type") in ["Killing", "Terminated", "Not Restarting"]:
+                            reason = event.get("DisplayMessage", "")
+                            if reason:
+                                stop_reason = f"Job stopped: {reason}"
+                                break
+                    tracker.error = Exception(stop_reason)
                 else:
                     tracker.exit_code = task_state.get("ExitCode", 0)
                 return
