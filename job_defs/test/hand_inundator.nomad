@@ -27,8 +27,9 @@ job "hand_inundator" {
       attempts = 0 # this needs to only be 0 re-attempts or will mess up pipeline job tracking
     }
 
+    # inundate fails for predictible reasons. Restarting takes alot of time. Will rely on manually querying inundate job failures in AWS console to detect if a batch had inundate failures that were novel.
     restart {
-      attempts = 3        # Try N times on the same node
+      attempts = 0        # Try N times on the same node
       delay    = "15s"    # Wait between attempts
       mode     = "fail"   # Fail after attempts exhausted
     }

@@ -99,7 +99,7 @@ for resolution in "${RESOLUTIONS[@]}"; do
         fi
         
         # Build the submit_stac_batch.py command
-        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 100" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy until Cloudwatch Log quota increased
+        submit_cmd="python tools/submit_stac_batch.py --batch_name $batch_name --output_root $output_root --hand_index_path $hand_index_path --benchmark_sources \"$collection\" --item_list $item_list_file --wait_seconds 10 --max_pipelines 100" # Scaling tests showed you shouldn't go above this many pipelines with current Nomad deploy (36 core server + 80 r5a.xlarge) and job defs
         
         # Get user confirmation and execute
         if confirm_command "$submit_cmd"; then
