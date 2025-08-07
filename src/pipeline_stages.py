@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, field_serializer
 
 from load_config import AppConfig
+from nomad_job_manager import NomadError
 from pipeline_utils import PathFactory, PipelineResult
 
 logger = logging.getLogger(__name__)
@@ -411,6 +412,8 @@ class MosaicStage(PipelineStage):
 
         # Update results based on success/failure
         successful_results = []
+        failed_scenarios = []
+        
         for result, hand_result, benchmark_result in zip(
             task_results, hand_results, benchmark_results
         ):
@@ -431,11 +434,24 @@ class MosaicStage(PipelineStage):
                 successful_results.append(result)
                 logger.debug(f"[{result.scenario_id}] Mosaic stage complete")
             else:
+                failure_type = []
+                if hand_failed:
+                    failure_type.append("HAND")
+                if benchmark_failed:
+                    failure_type.append("benchmark")
                 result.mark_failed("One or both mosaics failed")
+                failed_scenarios.append(f"{result.scenario_id} ({', '.join(failure_type)})")
 
         self.log_stage_complete(
             "Mosaic", len(successful_results), len(valid_results)
         )
+        
+        # Raise exception if any mosaic jobs failed
+        if failed_scenarios:
+            error_msg = f"Mosaic stage failed for {len(failed_scenarios)} scenario(s): {', '.join(failed_scenarios)}"
+            logger.error(error_msg)
+            raise NomadError(error_msg)
+            
         return successful_results
 
     def _create_mosaic_meta(
@@ -515,12 +531,15 @@ class AgreementStage(PipelineStage):
 
         # Update results based on success/failure
         successful_results = []
+        failed_scenarios = []
+        
         for result, job_result in zip(task_results, task_job_results):
             if isinstance(job_result, Exception):
                 result.mark_failed(f"Agreement job failed: {job_result}")
                 logger.error(
                     f"[{result.scenario_id}] Agreement job failed: {job_result}"
                 )
+                failed_scenarios.append(result.scenario_id)
             else:
                 result.mark_completed()
                 successful_results.append(result)
@@ -529,6 +548,13 @@ class AgreementStage(PipelineStage):
         self.log_stage_complete(
             "Agreement", len(successful_results), len(valid_results)
         )
+        
+        # Raise exception if any agreement jobs failed
+        if failed_scenarios:
+            error_msg = f"Agreement stage failed for {len(failed_scenarios)} scenario(s): {', '.join(failed_scenarios)}"
+            logger.error(error_msg)
+            raise NomadError(error_msg)
+            
         return successful_results
 
     def _create_agreement_meta(
