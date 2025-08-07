@@ -14,7 +14,7 @@ import fsspec
 import geopandas as gpd
 
 import default_config
-from data_service import DataService
+from data_service import DataService, DataServiceException
 from load_config import AppConfig, load_config
 from metrics_aggregator import MetricsAggregator
 from nomad_job_manager import NomadJobManager
@@ -266,6 +266,9 @@ class PolygonPipeline:
                 f"Pipeline SUCCESS: {len(successful_results)}/{total_attempted} scenarios completed"
             )
             return summary
+        except DataServiceException as e:
+            logger.error(f"Pipeline FAILED due to data service error: {str(e)}")
+            return {"status": "failed", "error": str(e), "message": f"Data service error: {str(e)}"}
         except Exception as e:
             logger.error(f"Pipeline FAILED: {str(e)}")
             return {

@@ -21,6 +21,11 @@ from load_config import AppConfig
 from stac_querier import StacQuerier
 
 
+class DataServiceException(Exception):
+    """Custom exception for data service operations."""
+    pass
+
+
 class DataService:
     """Service to query data sources and interact with S3 via fsspec."""
 
@@ -275,7 +280,7 @@ class DataService:
                 return dest_uri
             except Exception as e:
                 logging.exception(f"Failed to copy {source_path} to {dest_uri}")
-                raise ConnectionError(f"Failed to copy file to {dest_uri}") from e
+                raise DataServiceException(f"Failed to copy file to {dest_uri}: {str(e)}") from e
         else:
             # If already on S3 or both local with same path, just return the source path
             logging.debug(f"No copy needed - using existing path: {source_path}")
@@ -311,7 +316,7 @@ class DataService:
             return dest_uri
         except Exception as e:
             logging.exception(f"Failed to append {source_path} to {dest_uri}")
-            raise ConnectionError(f"Failed to append file to {dest_uri}") from e
+            raise DataServiceException(f"Failed to append file to {dest_uri}: {str(e)}") from e
 
     def _sync_append_file(self, source_path: str, dest_uri: str, dest_exists: bool):
         """Synchronous helper for appending files using fsspec."""
@@ -353,8 +358,8 @@ class DataService:
                 uri,
             )
         except Exception as e:
-            logging.warning(f"Error checking file {uri}: {e}")
-            return False
+            logging.exception(f"Error checking file {uri}")
+            raise DataServiceException(f"Failed to check file existence {uri}: {str(e)}") from e
 
     def _sync_check_file_exists(self, uri: str) -> bool:
         """Synchronous helper to check if file exists (S3 or local)."""
@@ -438,8 +443,8 @@ class DataService:
             return metrics_files
 
         except Exception as e:
-            logging.error(f"Error finding metrics files in {base_path}: {e}")
-            return []
+            logging.exception(f"Error finding metrics files in {base_path}")
+            raise DataServiceException(f"Failed to find metrics files in {base_path}: {str(e)}") from e
 
     def cleanup(self):
         """Clean up resources, including HandIndexQuerier connection."""
