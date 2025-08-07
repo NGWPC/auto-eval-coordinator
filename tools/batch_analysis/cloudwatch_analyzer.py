@@ -90,7 +90,7 @@ class CloudWatchAnalyzer:
         query_string: str,
         start_time: int,
         end_time: int,
-        minutes_per_batch: int = 10,
+        minutes_per_batch: int = 5,
     ) -> List[Dict]:
         """
         Execute a CloudWatch Logs Insights query with time-based pagination.
