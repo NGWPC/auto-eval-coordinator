@@ -189,18 +189,23 @@ class NomadJobManager:
         except Exception as e:
             # Extract more detailed error information
             error_msg = str(e)
-            
+
             # Special handling for RetryError that wraps BaseNomadException
-            if "RetryError" in str(type(e)) and "BaseNomadException" in error_msg:
+            if (
+                "RetryError" in str(type(e))
+                and "BaseNomadException" in error_msg
+            ):
                 # Try to extract the cause from RetryError
-                if hasattr(e, '__cause__') and e.__cause__:
+                if hasattr(e, "__cause__") and e.__cause__:
                     error_msg = f"{error_msg} - Cause: {str(e.__cause__)}"
-                elif hasattr(e, 'last_attempt') and hasattr(e.last_attempt, 'exception'):
+                elif hasattr(e, "last_attempt") and hasattr(
+                    e.last_attempt, "exception"
+                ):
                     # For tenacity RetryError
                     last_exception = e.last_attempt.exception()
                     if last_exception:
                         error_msg = f"RetryError after 3 attempts - Last error: {str(last_exception)}"
-            
+
             logger.error(f"Failed to dispatch job {job_name}: {error_msg}")
             raise JobDispatchError(
                 f"Failed to dispatch job {job_name}: {error_msg}"
@@ -246,7 +251,9 @@ class NomadJobManager:
             allocations = await self.api.get_allocations(tracker.job_id)
 
             time_since_dispatch = time.time() - tracker.dispatch_time
-            if not allocations and time_since_dispatch > 1800:  # 30 mins
+            if (
+                not allocations and time_since_dispatch > 14400
+            ):  # allow 4 hrs to allocate for jobs that take a while to go from pending to dispatched
                 logger.warning(
                     f"No allocations found for job {tracker.job_id} after 30 minutes, marking as LOST."
                 )
@@ -366,7 +373,11 @@ class NomadJobManager:
                     # Search for stop reason
                     stop_reason = "Job was stopped"
                     for event in reversed(task_state.get("Events", [])):
-                        if event.get("Type") in ["Killing", "Terminated", "Not Restarting"]:
+                        if event.get("Type") in [
+                            "Killing",
+                            "Terminated",
+                            "Not Restarting",
+                        ]:
                             reason = event.get("DisplayMessage", "")
                             if reason:
                                 stop_reason = f"Job stopped: {reason}"
