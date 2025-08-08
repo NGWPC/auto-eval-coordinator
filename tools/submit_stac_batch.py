@@ -250,9 +250,16 @@ def main():
         help="Seconds to wait between job submissions",
     )
     parser.add_argument(
-        "--max_pipelines",
+        "--stop_threshold",
         type=int,
-        help="Maximum number of pipeline jobs to allow running/queued concurrently",
+        required=True,
+        help="Stop submitting jobs when this many pipelines are running/queued",
+    )
+    parser.add_argument(
+        "--resume_threshold",
+        type=int,
+        required=True,
+        help="Resume submitting jobs when running/queued pipelines drop to this level (must be less than stop_threshold)",
     )
 
     # Nomad connection arguments
@@ -290,6 +297,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Validate threshold relationship
+    if args.resume_threshold >= args.stop_threshold:
+        parser.error("--resume_threshold must be less than --stop_threshold")
 
     # Setup logging
     logging.basicConfig(
@@ -358,24 +369,48 @@ def main():
     # Process STAC items - submit all jobs immediately
     submitted_jobs = []
     failed_submissions = []
+    
+    # Track submission state for hysteresis
+    submission_paused = False
 
     logging.info(f"Starting job submission for {len(s3_aoi_paths)} STAC items")
+    logging.info(f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}")
 
     for item_id, (s3_path, collection_id) in s3_aoi_paths.items():
-        # Wait for pipeline slots if max limit specified
-        if args.max_pipelines is not None:
-            while True:
-                current_jobs = get_running_pipeline_jobs(nomad_client)
-                # Add 1 to account for the parameterized job template that's always running
-                if current_jobs < args.max_pipelines + 1:
+        # Implement hysteresis for job submission control
+        while True:
+            current_jobs = get_running_pipeline_jobs(nomad_client)
+            # Subtract 1 to account for the parameterized job template that's always running
+            actual_running = current_jobs - 1
+            
+            if not submission_paused:
+                # Currently submitting - check if we should pause
+                if actual_running >= args.stop_threshold:
+                    submission_paused = True
+                    logging.info(
+                        f"Stop threshold ({args.stop_threshold}) reached. Current jobs: {actual_running}. "
+                        f"Pausing submissions until jobs drop to {args.resume_threshold}..."
+                    )
+                else:
+                    # Can continue submitting
                     break
-                wait_time = max(
-                    args.wait_seconds, 10
-                )  # Minimum 10 seconds to avoid hammering the API
-                logging.info(
-                    f"Maximum pipeline limit ({args.max_pipelines}) reached. Current jobs: {current_jobs - 1}. Waiting {wait_time} seconds..."  # current jobs is current chiled jobs so have to subtract 1 for parent
-                )
-                time.sleep(wait_time)
+            else:
+                # Currently paused - check if we should resume
+                if actual_running <= args.resume_threshold:
+                    submission_paused = False
+                    logging.info(
+                        f"Resume threshold ({args.resume_threshold}) reached. Current jobs: {actual_running}. "
+                        f"Resuming submissions..."
+                    )
+                    break
+                else:
+                    # Still need to wait
+                    wait_time = max(args.wait_seconds, 10)  # Minimum 10 seconds to avoid hammering the API
+                    logging.debug(
+                        f"Waiting for jobs to drop to resume threshold. Current: {actual_running}, "
+                        f"Resume at: {args.resume_threshold}. Waiting {wait_time} seconds..."
+                    )
+                    time.sleep(wait_time)
 
         logging.info(
             f"Submitting job for STAC item {item_id} (collection: {collection_id})"
