@@ -252,8 +252,8 @@ class NomadJobManager:
 
             time_since_dispatch = time.time() - tracker.dispatch_time
             if (
-                not allocations and time_since_dispatch > 14400
-            ):  # allow 4 hrs to allocate for jobs that take a while to go from pending to dispatched
+                not allocations and time_since_dispatch > 28800
+            ):  # allow 8 hrs to allocate for jobs that take a while to go from pending to dispatched
                 logger.warning(
                     f"No allocations found for job {tracker.job_id} after 30 minutes, marking as LOST."
                 )

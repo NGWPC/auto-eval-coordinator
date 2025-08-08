@@ -31,7 +31,7 @@ job "pipeline" {
     }
 
     restart {
-      attempts = 3        # Try N times on the same node
+      attempts = 1        # Try N times on the same node
       delay    = "15s"    # Wait  between attempts
       mode     = "fail"   # Fail after attempts exhausted
     }
