@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def stagger_delay() -> float:
-    """Generate a random delay between 1 and 5 seconds for job submission staggering."""
-    return random.uniform(1.0, 5.0)
+    """Generate a random delay for job submission staggering."""
+    return random.uniform(0.1, 1.0)
 
 
 class DispatchMetaBase(BaseModel):
@@ -413,7 +413,7 @@ class MosaicStage(PipelineStage):
         # Update results based on success/failure
         successful_results = []
         failed_scenarios = []
-        
+
         for result, hand_result, benchmark_result in zip(
             task_results, hand_results, benchmark_results
         ):
@@ -440,18 +440,20 @@ class MosaicStage(PipelineStage):
                 if benchmark_failed:
                     failure_type.append("benchmark")
                 result.mark_failed("One or both mosaics failed")
-                failed_scenarios.append(f"{result.scenario_id} ({', '.join(failure_type)})")
+                failed_scenarios.append(
+                    f"{result.scenario_id} ({', '.join(failure_type)})"
+                )
 
         self.log_stage_complete(
             "Mosaic", len(successful_results), len(valid_results)
         )
-        
+
         # Raise exception if any mosaic jobs failed
         if failed_scenarios:
             error_msg = f"Mosaic stage failed for {len(failed_scenarios)} scenario(s): {', '.join(failed_scenarios)}"
             logger.error(error_msg)
             raise NomadError(error_msg)
-            
+
         return successful_results
 
     def _create_mosaic_meta(
@@ -532,7 +534,7 @@ class AgreementStage(PipelineStage):
         # Update results based on success/failure
         successful_results = []
         failed_scenarios = []
-        
+
         for result, job_result in zip(task_results, task_job_results):
             if isinstance(job_result, Exception):
                 result.mark_failed(f"Agreement job failed: {job_result}")
@@ -548,13 +550,13 @@ class AgreementStage(PipelineStage):
         self.log_stage_complete(
             "Agreement", len(successful_results), len(valid_results)
         )
-        
+
         # Raise exception if any agreement jobs failed
         if failed_scenarios:
             error_msg = f"Agreement stage failed for {len(failed_scenarios)} scenario(s): {', '.join(failed_scenarios)}"
             logger.error(error_msg)
             raise NomadError(error_msg)
-            
+
         return successful_results
 
     def _create_agreement_meta(
