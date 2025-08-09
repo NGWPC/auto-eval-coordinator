@@ -27,18 +27,15 @@ job "pipeline" {
   }
 
   group "pipeline-coordinator" {
+
+    # don't reschedule or reattempt a failed pipeline. Just want until the next batch run. This saves on compute and makes it easier to scrape logs for failures.
+  
     reschedule {
-      attempts = 2 # Only attempt to reschedule twice otherwise will rerun broken pipelines too many times
-      interval = "24h"
-      delay = "4m"
-      delay_function = "constant"
-      unlimited = false
+      attempts = 0
     }
 
     restart {
-      attempts = 1        # Try N times on the same node
-      delay    = "15s"    # Wait  between attempts
-      mode     = "fail"   # Fail after attempts exhausted
+      attempts = 0        # Try N times on the same node
     }
 
     task "coordinator" {
