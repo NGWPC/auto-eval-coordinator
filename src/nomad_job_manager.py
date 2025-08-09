@@ -274,9 +274,14 @@ class NomadJobManager:
             )
             await self._update_tracker_from_allocation(tracker, latest_alloc)
 
-        except nomad.api.exceptions.URLNotFoundNomadException as e:
+        except (nomad.api.exceptions.URLNotFoundNomadException, nomad.api.exceptions.BaseNomadException) as e:
+            # Extract more detailed error information
+            error_msg = str(e)
+            if hasattr(e, "__cause__") and e.__cause__:
+                error_msg = f"{error_msg} - Cause: {str(e.__cause__)}"
+            
             logger.error(
-                f"Polling failed for job {tracker.job_id}, it may have been purged. Marking as LOST. Error: {e}"
+                f"Polling failed for job {tracker.job_id}, it may have been purged. Marking as LOST. Error: {error_msg}"
             )
             tracker.status = JobStatus.LOST
             tracker.error = e
