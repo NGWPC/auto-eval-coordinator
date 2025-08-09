@@ -2,6 +2,11 @@ job "agreement_maker" {
   datacenters = ["dc1"] 
   type        = "batch"
 
+  constraint {
+    attribute = "${node.class}"
+    value     = "linux"
+  }
+
   parameterized {
     meta_required = [
       "candidate_path", 
