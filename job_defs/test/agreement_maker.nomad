@@ -87,8 +87,8 @@ job "agreement_maker" {
         
         # Processing Configuration
         DASK_CLUST_MAX_MEM = "22GB"
-        RASTERIO_CHUNK_SIZE = "1024"
-        DEFAULT_WRITE_BLOCK_SIZE = "1024"
+        RASTERIO_CHUNK_SIZE = "2048"
+        DEFAULT_WRITE_BLOCK_SIZE = "2048"
         COG_BLOCKSIZE = "512"
         COG_OVERVIEW_LEVEL = "4"
         
