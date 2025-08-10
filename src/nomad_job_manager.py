@@ -248,6 +248,9 @@ class NomadJobManager:
     async def _poll_job_and_update_tracker(self, tracker: JobTracker):
         """Polls a single job and updates its tracker if the status has changed."""
         try:
+            # First, check if the job itself still exists. This avoids polling for allocations of a job that has been purged.
+            await self.api.get_job(tracker.job_id)
+
             allocations = await self.api.get_allocations(tracker.job_id)
 
             time_since_dispatch = time.time() - tracker.dispatch_time
@@ -274,12 +277,15 @@ class NomadJobManager:
             )
             await self._update_tracker_from_allocation(tracker, latest_alloc)
 
-        except (nomad.api.exceptions.URLNotFoundNomadException, nomad.api.exceptions.BaseNomadException) as e:
+        except (
+            nomad.api.exceptions.URLNotFoundNomadException,
+            nomad.api.exceptions.BaseNomadException,
+        ) as e:
             # Extract more detailed error information
             error_msg = str(e)
             if hasattr(e, "__cause__") and e.__cause__:
                 error_msg = f"{error_msg} - Cause: {str(e.__cause__)}"
-            
+
             logger.error(
                 f"Polling failed for job {tracker.job_id}, it may have been purged. Marking as LOST. Error: {error_msg}"
             )
