@@ -27,7 +27,7 @@ fi
 RUN_LIST="$1"
 BATCH_NAME="$2"
 OUTPUT_DIR="$3"
-LOG_GROUP="/aws/batch/job"
+LOG_GROUP="/aws/ec2/nomad-client-linux-test"
 
 # Validate run list exists
 if [ ! -f "$RUN_LIST" ]; then
@@ -128,7 +128,13 @@ run_query() {
     aws logs get-query-results --query-id "$query_id" --output text > "$output_file"
     
     # Check if we hit the 10000 result limit
-    result_count=$(grep -c "^[0-9]" "$output_file" || echo 0)
+    if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+        # Count non-empty lines, excluding the header line
+        result_count=$(tail -n +2 "$output_file" | grep -v "^$" | wc -l)
+    else
+        result_count=0
+    fi
+    
     if [ "$result_count" -eq 10000 ]; then
         echo " WARNING: Query returned exactly 10000 results (CloudWatch limit reached)"
         echo " Some results may be missing. Consider using a narrower time range."
