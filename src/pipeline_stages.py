@@ -168,6 +168,17 @@ class InundationStage(PipelineStage):
         task_metadata = []
 
         for result in valid_results:
+            # Copy flowfile once per scenario
+            flowfile_s3_path = await self.data_svc.copy_file_to_uri(
+                result.flowfile_path,
+                self.path_factory.flowfile_path(
+                    result.collection_name, result.scenario_name
+                ),
+            )
+            logger.debug(
+                f"[{result.scenario_id}] Copied flowfile to S3: {flowfile_s3_path}"
+            )
+            
             for catch_id, catchment_info in self.catchments.items():
                 output_path = self.path_factory.inundation_output_path(
                     result.collection_name, result.scenario_name, catch_id
@@ -178,7 +189,7 @@ class InundationStage(PipelineStage):
 
                 task = asyncio.create_task(
                     self._process_catchment(
-                        result, catch_id, catchment_info, output_path
+                        result, catch_id, catchment_info, output_path, flowfile_s3_path
                     )
                 )
                 tasks.append(task)
@@ -235,6 +246,7 @@ class InundationStage(PipelineStage):
         catch_id: str,
         catchment_info: Dict[str, Any],
         output_path: str,
+        flowfile_s3_path: str,
     ) -> str:
         """Process a single catchment for a scenario."""
         # Copy files to S3
@@ -246,12 +258,6 @@ class InundationStage(PipelineStage):
         parquet_path = await self.data_svc.copy_file_to_uri(
             local_parquet,
             self.path_factory.catchment_parquet_path(catch_id),
-        )
-        flowfile_s3_path = await self.data_svc.copy_file_to_uri(
-            result.flowfile_path,
-            self.path_factory.flowfile_path(
-                result.collection_name, result.scenario_name
-            ),
         )
 
         meta = self._create_inundation_meta(
