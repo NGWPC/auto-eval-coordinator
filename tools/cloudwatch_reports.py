@@ -164,7 +164,7 @@ def main():
         "early_exit": 'fields @logStream | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter strcontains(@message, "Pipeline exiting early") | dedup @logStream',
         "failed": 'fields @logStream | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter strcontains(@message, "Pipeline FAILED") | dedup @logStream',
         "job_errors": "fields @logStream, @message | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter @message like /OOM|HTTPConnectionPool|BaseNomadException|JobStatus\\.(LOST|STOPPED|CANCELLED)|botocore\\.exceptions\\.ClientError/ | dedup @logStream",
-        "agr_mos_errors": "fields @logStream, @message | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/ | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/) and @message not like /Agreement map contains no valid data/ and @message not like /distributed\\.shuffle/ and @message not like /No features found/ and @message not like /Worker is at/ and @message not like /gc\\.collect/ and @message not like /UserWarning: Sending large graph/ and @message not like /warnings\\.warn/ and @message not like /has GPKG application_id/ and @message not like /distributed\\.nanny - WARNING - Worker process still alive/ | dedup @logStream",
+        "agr_mos_errors": "fields @logStream, @message | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/ | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/) and @message not like /Agreement map contains no valid data/ and @message not like /distributed\\.shuffle/ and @message not like /No features found/ and @message not like /Worker is at/ and @message not like /gc\\.collect/ and @message not like /NotGeoreferencedWarning/ and @message not like /UserWarning: Sending large graph/ and @message not like /warnings\\.warn/ and @message not like /has GPKG application_id/ and @message not like /distributed\\.nanny - WARNING - Worker process still alive/ | dedup @logStream",
         "inundate_errors": "fields @logStream, @message | filter @logStream like /hand_inundator\\/dispatch-\\[batch_name={0}/ | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/) and @message not like /No matching forecast data/ and @message not like /'NoneType' is not iterable/ and @message not like /No catchments with negative LakeID/ | dedup @logStream",
         "ignorable_errors": "fields @logStream, @message | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/ | filter @message like /Agreement map contains no valid data/ | dedup @logStream",
     }
@@ -212,7 +212,11 @@ def main():
 
     successful_aois -= failed_aois
 
-    truly_ignorable = aoi_sets["ignorable_errors"] - failed_aois
+    # AOIs with ignorable errors but no real errors (agr_mos or inundate) should be considered successful
+    real_error_aois = aoi_sets["agr_mos_errors"].union(
+        aoi_sets["inundate_errors"]
+    )
+    truly_ignorable = aoi_sets["ignorable_errors"] - real_error_aois
     write_aois_to_file(
         args.output_dir / "ignorable_errors_aois.txt", truly_ignorable
     )
