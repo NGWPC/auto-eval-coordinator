@@ -56,7 +56,9 @@ job "pipeline" {
           "--hand_index_path", "${NOMAD_META_hand_index_path}",
           "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
           "--tags", "${NOMAD_META_tags}",
-        ]
+          # remove this if test cases don't correspond to unique Benchmark STAC items
+          "--aoi_is_item",
+          ]
       }
 
       env {

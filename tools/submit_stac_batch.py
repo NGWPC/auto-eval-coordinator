@@ -369,12 +369,14 @@ def main():
     # Process STAC items - submit all jobs immediately
     submitted_jobs = []
     failed_submissions = []
-    
+
     # Track submission state for hysteresis
     submission_paused = False
 
     logging.info(f"Starting job submission for {len(s3_aoi_paths)} STAC items")
-    logging.info(f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}")
+    logging.info(
+        f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}"
+    )
 
     for item_id, (s3_path, collection_id) in s3_aoi_paths.items():
         # Implement hysteresis for job submission control
@@ -382,7 +384,7 @@ def main():
             current_jobs = get_running_pipeline_jobs(nomad_client)
             # Subtract 1 to account for the parameterized job template that's always running
             actual_running = current_jobs - 1
-            
+
             if not submission_paused:
                 # Currently submitting - check if we should pause
                 if actual_running >= args.stop_threshold:
@@ -405,7 +407,9 @@ def main():
                     break
                 else:
                     # Still need to wait
-                    wait_time = max(args.wait_seconds, 10)  # Minimum 10 seconds to avoid hammering the API
+                    wait_time = max(
+                        args.wait_seconds, 10
+                    )  # Minimum 10 seconds to avoid hammering the API
                     logging.debug(
                         f"Waiting for jobs to drop to resume threshold. Current: {actual_running}, "
                         f"Resume at: {args.resume_threshold}. Waiting {wait_time} seconds..."

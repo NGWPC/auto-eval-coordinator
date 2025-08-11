@@ -59,6 +59,8 @@ job "pipeline" {
           "--hand_index_path", "${NOMAD_META_hand_index_path}",
           "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
           "--tags", "${NOMAD_META_tags}",
+          # remove this if test cases don't correspond to unique Benchmark STAC items
+          "--aoi_is_item",
         ]
 
         logging {
@@ -94,7 +96,7 @@ job "pipeline" {
         HTTP_CONNECTION_LIMIT = "100"
         
         # HAND Index Configuration
-        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "40.0"
+        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "60.0"
         
         # STAC Configuration
         STAC_API_URL            = "http://benchmark-stac.test.nextgenwaterprediction.com:8000/" # Using production STAC API for test

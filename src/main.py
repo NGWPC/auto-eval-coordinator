@@ -367,7 +367,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--aoi-is-item",
+        "--aoi_is_item",
         action="store_true",
         help="If set, treat the aoi_name tag as a STAC item ID for direct querying instead of performing spatial queries",
     )

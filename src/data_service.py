@@ -142,7 +142,7 @@ class DataService:
             if self.aoi_is_item:
                 # Direct item query mode - extract aoi_name from tags
                 if not tags or "aoi_name" not in tags:
-                    raise ValueError("aoi_name tag is required when --aoi-is-item is used")
+                    raise ValueError("aoi_name tag is required when --aoi_is_item is used")
                 
                 aoi_name = tags["aoi_name"]
                 logging.info(f"Querying STAC for specific item ID: {aoi_name}")
