@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def stagger_delay() -> float:
     """Generate a random delay for job submission staggering."""
-    return random.uniform(0.1, 0.3)
+    return random.uniform(0.1, 2.0)
 
 
 class DispatchMetaBase(BaseModel):
@@ -178,7 +178,7 @@ class InundationStage(PipelineStage):
             logger.debug(
                 f"[{result.scenario_id}] Copied flowfile to S3: {flowfile_s3_path}"
             )
-            
+
             for catch_id, catchment_info in self.catchments.items():
                 output_path = self.path_factory.inundation_output_path(
                     result.collection_name, result.scenario_name, catch_id
@@ -189,7 +189,11 @@ class InundationStage(PipelineStage):
 
                 task = asyncio.create_task(
                     self._process_catchment(
-                        result, catch_id, catchment_info, output_path, flowfile_s3_path
+                        result,
+                        catch_id,
+                        catchment_info,
+                        output_path,
+                        flowfile_s3_path,
                     )
                 )
                 tasks.append(task)
