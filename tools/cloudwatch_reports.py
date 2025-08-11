@@ -183,7 +183,8 @@ def main():
         write_data_to_json(args.output_dir / f"{name}_results.json", results)
         aois = extract_aois_from_results(results)
         # don't write ignorable errors here since need to write truly ignorable errored out aoi's after taking into account aoi's that have both ignorable errrors and valid errors
-        if name != "ignorable_errors":
+        # don't write success or failed aois since we write final results at the end
+        if name not in ["ignorable_errors", "success", "failed"]:
             write_aois_to_file(args.output_dir / f"{name}_aois.txt", aois)
 
         aoi_sets[name] = aois
