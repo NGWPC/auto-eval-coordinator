@@ -29,8 +29,9 @@ class DataServiceException(Exception):
 class DataService:
     """Service to query data sources and interact with S3 via fsspec."""
 
-    def __init__(self, config: AppConfig, hand_index_path: str, benchmark_collections: Optional[List[str]] = None):
+    def __init__(self, config: AppConfig, hand_index_path: str, benchmark_collections: Optional[List[str]] = None, aoi_is_item: bool = False):
         self.config = config
+        self.aoi_is_item = aoi_is_item
 
         # Configure S3 filesystem options - try config first, then IAM credentials
         self._s3_options = {}
@@ -72,6 +73,7 @@ class DataService:
                 collections=benchmark_collections,
                 overlap_threshold_percent=config.stac.overlap_threshold_percent,
                 datetime_filter=config.stac.datetime_filter,
+                aoi_is_item=aoi_is_item,
             )
 
         # Initialize FlowfileCombiner
@@ -114,12 +116,13 @@ class DataService:
         except Exception as e:
             raise ValueError(f"Error loading GeoDataFrame from {file_path}: {e}")
 
-    async def query_stac_for_flow_scenarios(self, polygon_gdf: gpd.GeoDataFrame) -> Dict:
+    async def query_stac_for_flow_scenarios(self, polygon_gdf: gpd.GeoDataFrame, tags: Optional[Dict[str, str]] = None) -> Dict:
         """
-        Query STAC API for flow scenarios based on polygon.
+        Query STAC API for flow scenarios based on polygon or item ID.
 
         Args:
             polygon_gdf: GeoDataFrame containing polygon geometry
+            tags: Optional tags dictionary (required when aoi_is_item is True)
 
         Returns:
             Dictionary with STAC query results and combined flowfiles
@@ -135,12 +138,28 @@ class DataService:
         try:
             # Run STAC query in executor to avoid blocking
             loop = asyncio.get_running_loop()
-            stac_results = await loop.run_in_executor(
-                None,
-                self.stac_querier.query_stac_for_polygon,
-                polygon_gdf,
-                None,  # roi_geojson not needed since we have polygon_gdf
-            )
+            
+            if self.aoi_is_item:
+                # Direct item query mode - extract aoi_name from tags
+                if not tags or "aoi_name" not in tags:
+                    raise ValueError("aoi_name tag is required when --aoi-is-item is used")
+                
+                aoi_name = tags["aoi_name"]
+                logging.info(f"Querying STAC for specific item ID: {aoi_name}")
+                
+                stac_results = await loop.run_in_executor(
+                    None,
+                    self.stac_querier.query_stac_by_item_id,
+                    aoi_name,
+                )
+            else:
+                # Standard spatial query mode
+                stac_results = await loop.run_in_executor(
+                    None,
+                    self.stac_querier.query_stac_for_polygon,
+                    polygon_gdf,
+                    None,  # roi_geojson not needed since we have polygon_gdf
+                )
 
             if not stac_results:
                 logging.info(f"No STAC results found for polygon {polygon_id}")

@@ -73,7 +73,7 @@ class PolygonPipeline:
         # Query STAC for flow scenarios (always required)
         logger.debug("Querying STAC for flow scenarios")
         stac_data = await self.data_svc.query_stac_for_flow_scenarios(
-            self.polygon_gdf
+            self.polygon_gdf, self.tags
         )
         self.flow_scenarios = stac_data.get("combined_flowfiles", {})
 
@@ -366,6 +366,12 @@ if __name__ == "__main__":
         help="List of key=value pairs for tagging (e.g., --tags batch=my_batch aoi=texas) These tags are included in job_ids that the pipeline will dispatch.",
     )
 
+    parser.add_argument(
+        "--aoi-is-item",
+        action="store_true",
+        help="If set, treat the aoi_name tag as a STAC item ID for direct querying instead of performing spatial queries",
+    )
+
     args = parser.parse_args()
 
     if args.tags and args.tags != [""]:
@@ -442,7 +448,7 @@ if __name__ == "__main__":
                 )
 
             data_svc = DataService(
-                cfg, args.hand_index_path, benchmark_collections
+                cfg, args.hand_index_path, benchmark_collections, args.aoi_is_item
             )
 
             logging.info(f"Loading polygon from: {args.aoi}")

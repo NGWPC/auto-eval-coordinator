@@ -81,6 +81,7 @@ class StacQuerier:
         collections: Optional[List[str]] = None,
         overlap_threshold_percent: float = 40.0,
         datetime_filter: Optional[str] = None,
+        aoi_is_item: bool = False,
     ):
         """
         Initialize the StacQuerier.
@@ -90,11 +91,13 @@ class StacQuerier:
             collections: List of STAC collection IDs to query (None means query all available)
             overlap_threshold_percent: Minimum overlap percentage to keep a STAC item
             datetime_filter: STAC datetime or interval filter
+            aoi_is_item: If True, query specific STAC items directly by ID
         """
         self.api_url = api_url
         self.collections = collections
         self.overlap_threshold_percent = overlap_threshold_percent
         self.datetime_filter = datetime_filter
+        self.aoi_is_item = aoi_is_item
         self.client = None
 
         # Collection specifications
@@ -635,6 +638,58 @@ class StacQuerier:
             raise
         except Exception as ex:
             logger.error(f"Unexpected error: {ex}")
+            raise
+
+    def query_stac_by_item_id(self, item_id: str) -> Dict[str, Dict[str, Dict[str, List[str]]]]:
+        """
+        Query STAC API for a specific item by ID.
+
+        Args:
+            item_id: STAC item ID to retrieve
+
+        Returns:
+            Dictionary mapping collection -> scenario -> asset_type -> [paths]
+            Each scenario also includes 'stac_items' key with list of STAC item IDs
+        """
+        self._ensure_client()
+
+        try:
+            logger.info(f"Querying STAC for item ID: {item_id}")
+            
+            # Get the specific item
+            item = self.client.get_item(item_id)
+            if not item:
+                logger.info(f"No item found with ID: {item_id}")
+                return {}
+
+            # Process the single item using the existing format_results method
+            grouped = self._format_results([item])
+
+            if not grouped:
+                logger.info(f"No valid scenarios found after processing item {item_id}")
+                return {}
+
+            # Handle GFM expanded merging if needed
+            if "gfm_expanded" in grouped:
+                grouped["gfm_expanded"] = self._merge_gfm_expanded(grouped["gfm_expanded"])
+
+                # Truncate timestamp ranges to just the first timestamp
+                truncated = {}
+                for scenario_key, scenario_data in grouped["gfm_expanded"].items():
+                    if "/" in scenario_key:
+                        first_timestamp = scenario_key.split("/")[0]
+                        truncated[first_timestamp] = scenario_data
+                    else:
+                        truncated[scenario_key] = scenario_data
+                grouped["gfm_expanded"] = truncated
+
+            return dictify(grouped)
+
+        except requests.RequestException as rex:
+            logger.error(f"STAC request failed for item {item_id}: {rex}")
+            raise
+        except Exception as ex:
+            logger.error(f"Unexpected error querying item {item_id}: {ex}")
             raise
 
     def save_results(self, results: Dict, output_path: str):
