@@ -298,13 +298,13 @@ Default pipeline jobs: {", ".join(PIPELINE_JOBS)}
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=300,
+        default=500,
         help="Number of jobs to purge concurrently (default: 5)",
     )
     parser.add_argument(
         "--batch-delay",
         type=float,
-        default=0.1,
+        default=0.05,
         help="Delay in seconds between batches (default: 1.0)",
     )
 

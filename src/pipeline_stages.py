@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def stagger_delay() -> float:
     """Generate a random delay for job submission staggering."""
-    return random.uniform(0.1, 0.5)
+    return random.uniform(0.1, 2)
 
 
 class DispatchMetaBase(BaseModel):
