@@ -294,6 +294,26 @@ class NomadJobManager:
             tracker.completion_event.set()
             await self._update_db_status(tracker)
         except Exception as e:
+            # Check if this is a RetryError wrapping a Nomad exception
+            if "RetryError" in str(type(e)):
+                # Try to extract the wrapped exception
+                wrapped_exception = None
+                if hasattr(e, "last_attempt") and hasattr(e.last_attempt, "exception"):
+                    wrapped_exception = e.last_attempt.exception()
+                elif hasattr(e, "__cause__") and e.__cause__:
+                    wrapped_exception = e.__cause__
+                
+                # Check if the wrapped exception is a URLNotFoundNomadException
+                if wrapped_exception and "URLNotFoundNomadException" in str(type(wrapped_exception)):
+                    logger.error(
+                        f"Polling failed for job {tracker.job_id} after retries, job may have been purged. Marking as LOST. Error: {e}"
+                    )
+                    tracker.status = JobStatus.LOST
+                    tracker.error = e
+                    tracker.completion_event.set()
+                    await self._update_db_status(tracker)
+                    return
+            
             logger.warning(
                 f"Unexpected error while polling for job {tracker.job_id}: {e}"
             )

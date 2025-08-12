@@ -206,6 +206,7 @@ class InundationStage(PipelineStage):
 
         # Group results by scenario and validate outputs
         scenario_outputs = {}
+        lost_jobs = []
         for (result, catch_id, output_path), task_result in zip(
             task_metadata, task_results
         ):
@@ -218,6 +219,11 @@ class InundationStage(PipelineStage):
                 logger.error(
                     f"[{result.scenario_id}] Catchment {catch_id} inundation failed: {task_result}"
                 )
+                # Check if this is a LOST job (job was purged from Nomad)
+                error_str = str(task_result)
+                if ("Job lost" in error_str or 
+                    "URLNotFoundNomadException" in error_str):
+                    lost_jobs.append(f"{result.scenario_id}/{catch_id}")
 
         # Validate files and update results
         updated_results = []
@@ -242,6 +248,13 @@ class InundationStage(PipelineStage):
         self.log_stage_complete(
             "Inundation", len(updated_results), len(valid_results)
         )
+        
+        # Raise exception if any inundation jobs were lost
+        if lost_jobs:
+            error_msg = f"Inundation stage had {len(lost_jobs)} lost job(s): {', '.join(lost_jobs)}"
+            logger.error(error_msg)
+            raise NomadError(error_msg)
+        
         return updated_results
 
     async def _process_catchment(
