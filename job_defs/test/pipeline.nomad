@@ -96,7 +96,7 @@ job "pipeline" {
         HTTP_CONNECTION_LIMIT = "100"
         
         # HAND Index Configuration
-        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "60.0"
+        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "1.0" # Be generous in what gets included here
         
         # STAC Configuration
         STAC_API_URL            = "http://benchmark-stac.test.nextgenwaterprediction.com:8000/" # Using production STAC API for test
