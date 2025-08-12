@@ -160,13 +160,61 @@ def main():
 
     log_group = "/aws/ec2/nomad-client-linux-test"
     queries = {
-        "success": 'fields @logStream | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter strcontains(@message, "Pipeline SUCCESS") | dedup @logStream',
-        "early_exit": 'fields @logStream | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter strcontains(@message, "Pipeline exiting early") | dedup @logStream',
-        "failed": 'fields @logStream | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter strcontains(@message, "Pipeline FAILED") | dedup @logStream',
-        "job_errors": "fields @logStream, @message | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/ | filter @message like /OOM|HTTPConnectionPool|BaseNomadException|JobStatus\\.(LOST|STOPPED|CANCELLED)|botocore\\.exceptions\\.ClientError/ | dedup @logStream",
-        "agr_mos_errors": "fields @logStream, @message | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/ | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/) and @message not like /Agreement map contains no valid data/ and @message not like /distributed\\.shuffle/ and @message not like /No features found/ and @message not like /Worker is at/ and @message not like /gc\\.collect/ and @message not like /NotGeoreferencedWarning/ and @message not like /UserWarning: Sending large graph/ and @message not like /warnings\\.warn/ and @message not like /has GPKG application_id/ and @message not like /distributed\\.nanny - WARNING - Worker process still alive/ | dedup @logStream",
-        "inundate_errors": "fields @logStream, @message | filter @logStream like /hand_inundator\\/dispatch-\\[batch_name={0}/ | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/) and @message not like /No matching forecast data/ and @message not like /'NoneType' is not iterable/ and @message not like /No catchments with negative LakeID/ | dedup @logStream",
-        "ignorable_errors": "fields @logStream, @message | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/ | filter @message like /Agreement map contains no valid data/ | dedup @logStream",
+        "success": """
+            fields @logStream
+            | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/
+            | filter strcontains(@message, "Pipeline SUCCESS")
+            | dedup @logStream
+        """.strip(),
+        "early_exit": """
+            fields @logStream
+            | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/
+            | filter strcontains(@message, "Pipeline exiting early")
+            | dedup @logStream
+        """.strip(),
+        "failed": """
+            fields @logStream
+            | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/
+            | filter strcontains(@message, "Pipeline FAILED")
+            | dedup @logStream
+        """.strip(),
+        "job_errors": """
+            fields @logStream, @message
+            | filter @logStream like /pipeline\\/dispatch-\\[batch_name={0}/
+            | filter @message like /OOM|HTTPConnectionPool|BaseNomadException|JobStatus\\.(LOST|STOPPED|CANCELLED)|botocore\\.exceptions\\.ClientError/
+            | dedup @logStream
+        """.strip(),
+        "agr_mos_errors": """
+            fields @logStream, @message
+            | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/
+            | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/)
+                and @message not like /Agreement map contains no valid data/
+                and @message not like /distributed\\.shuffle/
+                and @message not like /No features found/
+                and @message not like /Worker is at/
+                and @message not like /gc\\.collect/
+                and @message not like /NotGeoreferencedWarning/
+                and @message not like /UserWarning: Sending large graph/
+                and @message not like /warnings\\.warn/
+                and @message not like /has GPKG application_id/
+                and @message not like /distributed\\.nanny - WARNING - Worker process still alive/
+            | dedup @logStream
+        """.strip(),
+        "inundate_errors": """
+            fields @logStream, @message
+            | filter @logStream like /hand_inundator\\/dispatch-\\[batch_name={0}/
+            | filter (@message like /[Ee][Rr][Rr][Oo][Rr]/ or @message like /[Ww][Aa][Rr][Nn]/)
+                and @message not like /No matching forecast data/
+                and @message not like /'NoneType' is not iterable/
+                and @message not like /No catchments with negative LakeID/
+            | dedup @logStream
+        """.strip(),
+        "ignorable_errors": """
+            fields @logStream, @message
+            | filter @logStream like /(agreement_maker|fim_mosaicker)\\/dispatch-\\[batch_name={0}/
+            | filter @message like /Agreement map contains no valid data/
+            | dedup @logStream
+        """.strip(),
     }
 
     # --- Execute all queries, write intermediate files, and gather AOIs ---
