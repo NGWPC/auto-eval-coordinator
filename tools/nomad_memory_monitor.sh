@@ -4,7 +4,7 @@
 
 ## This script monitors Nomad memory usage and triggers garbage collection when needed.
 # Set the memory threshold in GiB at which garbage collection should trigger
-MEMORY_THRESHOLD_GIB=8
+MEMORY_THRESHOLD_GIB=6
 
 MEMORY_THRESHOLD_BYTES=$(( MEMORY_THRESHOLD_GIB * 1024 * 1024 * 1024 ))
 

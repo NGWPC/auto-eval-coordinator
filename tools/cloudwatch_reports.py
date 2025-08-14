@@ -192,6 +192,7 @@ def main():
                 and @message not like /distributed\\.shuffle/
                 and @message not like /No features found/
                 and @message not like /Worker is at/
+                and @message not like /distributed\\.worker\\.memory - WARNING - Unmanaged memory use is high/
                 and @message not like /gc\\.collect/
                 and @message not like /NotGeoreferencedWarning/
                 and @message not like /UserWarning: Sending large graph/
