@@ -76,16 +76,21 @@ job "fim_mosaicker" {
         GDAL_CACHEMAX         = "1024"
         
         # GDAL Configuration
-        GDAL_NUM_THREADS = "1"
+        GDAL_NUM_THREADS = "1" # set this to 1 esspecially if using vsis3.
         GDAL_TIFF_DIRECT_IO = "YES"
         GDAL_DISABLE_READDIR_ON_OPEN = "TRUE"
         CPL_LOG_ERRORS = "ON"
         CPL_VSIL_CURL_ALLOWED_EXTENSIONS = ".tif,.vrt"
         VSI_CACHE_SIZE = "268435456"
         CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE = "YES"
+
+        # Set retry explicitely to ensure mosaic retries blocks when it hits s3 throttling.
+        GDAL_HTTP_MAX_RETRY =  "3"
+        GDAL_HTTP_RETRY_DELAY = "5"
+        GDAL_HTTP_RETRY_CODES =  "ALL"
         
         # Output Configuration
-        MOSAIC_BLOCK_SIZE = "1024" # use bigger blocks to boost the  effect of using multiple threads
+        MOSAIC_BLOCK_SIZE = "2048" # use bigger blocks to boost the  effect of using multiple threads
         MOSAIC_COMPRESS_TYPE = "LZW"
         MOSAIC_PREDICTOR = "2"
         
@@ -96,7 +101,7 @@ job "fim_mosaicker" {
       }
 
       resources {
-        memory = 10000 #Be generous here to avoid OOM
+        memory = 12000 #Be generous here to avoid OOM
       }
 
       logs {

@@ -86,7 +86,7 @@ job "agreement_maker" {
         CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE = "YES"
         
         # Processing Configuration
-        DASK_CLUST_MAX_MEM = "14.5GB"
+        DASK_CLUST_MAX_MEM = "29GB"
         RASTERIO_CHUNK_SIZE = "2048"
         DEFAULT_WRITE_BLOCK_SIZE = "1024"
         COG_BLOCKSIZE = "512"
@@ -103,7 +103,7 @@ job "agreement_maker" {
       }
 
       resources {
-        memory = 15000 # Higher memory for large raster processing. This should be DASK_CLUST_MAX_MEM + a bit more. Setting this to a bit higher than the max memory usage seen from agreement job while processing ripple data
+        memory = 30000 # Higher memory for large raster processing. This should be DASK_CLUST_MAX_MEM + a bit more. Setting this to a bit higher than the max memory usage seen from agreement job while processing ripple data
       }
 
       logs {
