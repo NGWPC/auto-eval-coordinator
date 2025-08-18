@@ -54,6 +54,7 @@ job "fim_mosaicker" {
           "--mosaic_output_path", "${NOMAD_META_output_path}",
           "--fim_type", "${NOMAD_META_fim_type}",
           "--clip_geometry_path", "${NOMAD_META_clip_geometry_path}",
+          "--parallel_blocks", "4",
         ]
 
         logging {
@@ -101,7 +102,7 @@ job "fim_mosaicker" {
       }
 
       resources {
-        memory = 12000 #Be generous here to avoid OOM
+        memory = 14000 #Be generous here to avoid OOM
       }
 
       logs {

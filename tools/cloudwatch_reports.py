@@ -194,7 +194,10 @@ def main():
                 and @message not like /Worker is at/
                 and @message not like /distributed\\.worker\\.memory - WARNING - Unmanaged memory use is high/
                 and @message not like /gc\\.collect/
+                and @message not like /Warning 1: Request for \\d+-\\d+ failed with response_code=\\d+/
+                and @message not like /Failed to communicate with scheduler during heartbeat/
                 and @message not like /NotGeoreferencedWarning/
+                and @message not like /distributed\\.comm\\.core\\.CommClosedError/
                 and @message not like /UserWarning: Sending large graph/
                 and @message not like /warnings\\.warn/
                 and @message not like /has GPKG application_id/
