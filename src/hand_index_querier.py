@@ -47,11 +47,30 @@ class HandIndexQuerier:
                 self.con.execute("LOAD httpfs;")
                 self.con.execute("INSTALL aws;")
                 self.con.execute("LOAD aws;")
-                # Might need to add the below back in when switch back to using IAM when nomad server role gets s3 bucket permissions
-                self.con.execute(f"SET s3_region = '{self.s3_region}';")
-                self.con.execute(f"SET s3_access_key_id='{self.credentials.access_key}';")
-                self.con.execute(f"SET s3_secret_access_key='{self.credentials.secret_key}';")
-                self.con.execute(f"SET s3_session_token='{self.credentials.token}';")
+                
+                # Try using DuckDB's credential chain provider instead of manual credentials
+                # This should work better with temporary credentials
+                try:
+                    self.con.execute(f"""
+                    CREATE SECRET s3_secret (
+                        TYPE S3,
+                        PROVIDER CREDENTIAL_CHAIN,
+                        REGION '{self.s3_region or 'us-east-1'}'
+                    );
+                    """)
+                    logger.info("Using DuckDB credential chain for S3 access")
+                except duckdb.Error as cred_chain_error:
+                    logger.warning(f"Credential chain failed, falling back to manual credentials: {cred_chain_error}")
+                    # Fallback to manual credential setting
+                    self.con.execute(f"SET s3_region = '{self.s3_region or 'us-east-1'}';")
+                    if self.credentials:
+                        if self.credentials.access_key:
+                            self.con.execute(f"SET s3_access_key_id='{self.credentials.access_key}';")
+                        if self.credentials.secret_key:
+                            self.con.execute(f"SET s3_secret_access_key='{self.credentials.secret_key}';")
+                        if self.credentials.token:
+                            self.con.execute(f"SET s3_session_token='{self.credentials.token}';")
+                
                 self.con.execute("SET memory_limit = '7GB';")
                 self.con.execute("SET temp_directory = '/tmp';")
 
