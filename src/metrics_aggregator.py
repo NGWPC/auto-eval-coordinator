@@ -90,7 +90,7 @@ class MetricsAggregator:
                 with fsspec.open(
                     metrics_file, **self.data_service._s3_options if metrics_file.startswith("s3://") else {}
                 ) as f:
-                    metrics_df = pd.read_csv(f, index_col=0)
+                    metrics_df = pd.read_csv(f)
 
                 if metrics_df.empty:
                     logger.warning(f"Empty metrics file: {metrics_file}")
