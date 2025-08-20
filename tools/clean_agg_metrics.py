@@ -239,7 +239,6 @@ def process_agg_metrics_file(
             logger.warning("  File is empty, skipping")
             return None
         
-        # Clean the data
         df_cleaned, stats = clean_agg_metrics_data(df, run_dir_name, logger)
         
         # Check if any changes were made
@@ -254,9 +253,9 @@ def process_agg_metrics_file(
                 with fsspec.open(file_path, "w", s3={"profile": aws_profile}) as f:
                     df_cleaned.to_csv(f, index=False)
                 
-                logger.info(f"Modified: {stats['original_rows']} → {stats['final_rows']} rows")
+                logger.info(f"Modified: {stats['original_rows']} to {stats['final_rows']} rows")
             else:
-                logger.info(f"  [DRY RUN] Would modify: {stats['original_rows']} → {stats['final_rows']} rows")
+                logger.info(f"  [DRY RUN] Would modify: {stats['original_rows']} to {stats['final_rows']} rows")
             
             return stats
         else:

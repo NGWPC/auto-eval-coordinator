@@ -21,7 +21,7 @@ def get_stac_item_directories(output_root: str) -> List[tuple[str, str]]:
     stac_item_dirs = []
 
     if output_root.startswith("s3://"):
-        fs = fsspec.filesystem("s3", profile="fimc-data")
+        fs = fsspec.filesystem("s3", anon=False)
         try:
             items = fs.ls(output_root, detail=True)
             for item in items:
@@ -56,7 +56,17 @@ def read_agg_metrics(agg_metrics_path: str) -> Optional[pd.DataFrame]:
     """
     try:
         with fsspec.open(agg_metrics_path, "r") as f:
-            df = pd.read_csv(f)
+            # Specify dtype for columns that should remain as strings
+            # to preserve leading zeros in HUC codes
+            dtype_spec = {
+                'hucs': str,
+                'nws_lid': str,
+                'stac_item_id': str,
+                'scenario': str,
+                'flow': str,
+                'collection_id': str
+            }
+            df = pd.read_csv(f, dtype=dtype_spec)
             return df
     except FileNotFoundError:
         logger.warning(f"File not found: {agg_metrics_path}")

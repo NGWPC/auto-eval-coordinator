@@ -101,6 +101,7 @@ def submit_pipeline_job(
             {
                 "aws_access_key": os.environ.get("AWS_ACCESS_KEY_ID", ""),
                 "aws_secret_key": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+                "aws_session_token": os.environ.get("AWS_SESSION_TOKEN", ""),
             }
         )
 
@@ -285,6 +286,13 @@ def main():
         action="store_true",
         help="Use AWS credentials from shell environment instead of IAM roles",
     )
+    
+    # Local output arguments
+    parser.add_argument(
+        "--use-local-output",
+        action="store_true",
+        help="Copy AOI files to a local directory instead of uploading to S3",
+    )
 
     # STAC-specific arguments
     parser.add_argument(
@@ -332,28 +340,57 @@ def main():
         f"Successfully extracted {len(item_files)} STAC item geometries"
     )
 
-    # Initialize fsspec S3 filesystem with fimc-data profile
-    s3_fs = fsspec.filesystem("s3", profile="fimbucket")
+    # Initialize appropriate filesystem based on output mode
+    if args.use_local_output:
+        # Use local filesystem
+        fs = fsspec.filesystem("file")
+        base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
+        logging.info(f"Using local output directory: {base_path}")
+    else:
+        # Use S3 filesystem with fimc-data profile
+        fs = fsspec.filesystem("s3", profile="fimbucket")
+        base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
+        logging.info(f"Using S3 output path: {base_path}")
 
-    # Upload AOI files to S3
-    s3_aoi_paths = {}
-    s3_base = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
+    # Create output directory if using local filesystem
+    if args.use_local_output:
+        fs.makedirs(base_path, exist_ok=True)
 
-    logging.info(f"Uploading AOI files to {s3_base}")
+    # Upload/copy AOI files using fsspec
+    aoi_paths = {}
+    action_verb = "Copying" if args.use_local_output else "Uploading"
+    
+    logging.info(f"{action_verb} AOI files to {base_path}")
     for item_id, (local_path, collection_id) in item_files.items():
-        s3_path = f"{s3_base}/stac_{item_id}.gpkg"
+        dest_path = f"{base_path}/stac_{item_id}.gpkg"
         try:
             with open(local_path, "rb") as local_file:
-                with s3_fs.open(s3_path, "wb") as s3_file:
-                    s3_file.write(local_file.read())
-            s3_aoi_paths[item_id] = (s3_path, collection_id)
-            logging.info(f"Uploaded {local_path} to {s3_path}")
+                with fs.open(dest_path, "wb") as dest_file:
+                    dest_file.write(local_file.read())
+            
+            # For local output, convert host path to container path
+            if args.use_local_output:
+                # Get the absolute path on the host
+                abs_dest_path = os.path.abspath(dest_path)
+                # Find where local-batches is in the path and replace everything before it with /
+                if '/local-batches/' in abs_dest_path:
+                    # Split at local-batches and rejoin with container mount point
+                    parts = abs_dest_path.split('/local-batches/')
+                    container_path = '/local-batches/' + parts[-1]
+                else:
+                    # Fallback - just use the dest_path as is
+                    container_path = dest_path
+                aoi_paths[item_id] = (container_path, collection_id)
+                logging.info(f"{action_verb} {local_path} to {dest_path} (container: {container_path})")
+            else:
+                aoi_paths[item_id] = (dest_path, collection_id)
+                logging.info(f"{action_verb} {local_path} to {dest_path}")
         except Exception as e:
-            logging.error(f"Failed to upload AOI for STAC item {item_id}: {e}")
+            logging.error(f"Failed to {action_verb.lower()} AOI for STAC item {item_id}: {e}")
             continue
 
-    if not s3_aoi_paths:
-        logging.error("No AOI files uploaded successfully")
+    if not aoi_paths:
+        logging.error(f"No AOI files {action_verb.lower()} successfully")
         return 1
 
     # Initialize Nomad client
@@ -373,12 +410,12 @@ def main():
     # Track submission state for hysteresis
     submission_paused = False
 
-    logging.info(f"Starting job submission for {len(s3_aoi_paths)} STAC items")
+    logging.info(f"Starting job submission for {len(aoi_paths)} STAC items")
     logging.info(
         f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}"
     )
 
-    for item_id, (s3_path, collection_id) in s3_aoi_paths.items():
+    for item_id, (aoi_path, collection_id) in aoi_paths.items():
         # Implement hysteresis for job submission control
         while True:
             current_jobs = get_running_pipeline_jobs(nomad_client)
@@ -424,7 +461,7 @@ def main():
             job_id = submit_pipeline_job(
                 nomad_client=nomad_client,
                 item_id=item_id,
-                gpkg_path=s3_path,
+                gpkg_path=aoi_path,
                 batch_name=args.batch_name,
                 output_root=args.output_root,
                 hand_index_path=args.hand_index_path,
