@@ -6,7 +6,6 @@ variable "repo_root" {
 job "agreement_maker" {
   datacenters = ["dc1"] 
   type        = "batch"
-  priority    = 80
 
   parameterized {
     meta_required = [
@@ -26,10 +25,14 @@ job "agreement_maker" {
   }
 
   group "agreement-processor" {
-    # Don't attempt restart since don't want to retry on most errors
+    reschedule {
+      attempts = 0 # this needs to only be 0 re-attempts or will mess up pipeline job tracking
+    }
+
     restart {
-      attempts = 0
-      mode     = "fail"
+      attempts = 3        # Try N times on the same node
+      delay    = "15s"    # Wait between attempts
+      mode     = "fail"   # Fail after attempts exhausted
     }
 
     task "processor" {
@@ -45,7 +48,8 @@ job "agreement_maker" {
         # Mount local test data and output directory
         volumes = [
           "${var.repo_root}/testdata:/testdata:ro",
-          "/tmp/autoeval-outputs:/outputs:rw"
+          "/tmp/autoeval-outputs:/outputs:rw",
+          "${var.repo_root}/local-batches:/local-batches:rw"
         ]
         
         command = "python3"
@@ -80,9 +84,9 @@ job "agreement_maker" {
         CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE = "YES"
         
         # Processing Configuration
-        DASK_CLUST_MAX_MEM = "8GB"
-        RASTERIO_CHUNK_SIZE = "4096"
-        DEFAULT_WRITE_BLOCK_SIZE = "4096"
+        DASK_CLUST_MAX_MEM = "27GB"
+        RASTERIO_CHUNK_SIZE = "2048"
+        DEFAULT_WRITE_BLOCK_SIZE = "1024"
         COG_BLOCKSIZE = "512"
         COG_OVERVIEW_LEVEL = "4"
         
@@ -97,7 +101,7 @@ job "agreement_maker" {
       }
 
       resources {
-        memory = 4000 
+        memory = 28000 
       }
 
       logs {

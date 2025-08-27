@@ -6,7 +6,6 @@ variable "repo_root" {
 job "pipeline" {
   datacenters = ["dc1"] 
   type        = "batch"
-  priority    = 75 # this needs to be within a delta of 10 of the individual pipeline stage job priority so that those don't preempt running pipeline jobs. It should still be lower so that stage jobs get scheduling preferences
 
   parameterized {
     meta_required = [
@@ -28,9 +27,14 @@ job "pipeline" {
   }
 
   group "pipeline-coordinator" {
-    restart {
+    # don't reschedule or reattempt a failed pipeline. Just want until the next batch run. This saves on compute and makes it easier to scrape logs for failures.
+  
+    reschedule {
       attempts = 0
-      mode     = "fail"
+    }
+
+    restart {
+      attempts = 0        # Try N times on the same node
     }
 
     task "coordinator" {
@@ -47,7 +51,8 @@ job "pipeline" {
         volumes = [
           "${var.repo_root}/testdata:/testdata:ro",
           "/tmp/autoeval-outputs:/outputs:rw",
-          "/tmp:/tmp:rw"
+          "/tmp:/tmp:rw",
+          "${var.repo_root}/local-batches:/local-batches:rw"
         ]
 
         args = [
@@ -82,12 +87,13 @@ job "pipeline" {
         HTTP_CONNECTION_LIMIT = "100"
         
         # HAND Index Configuration
-        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "40.0"
+        HAND_INDEX_OVERLAP_THRESHOLD_PERCENT = "1.0"
         
         # STAC Configuration
         # STAC_API_URL          = "http://127.0.0.1:8888/" # local test api
-        STAC_API_URL            = "http://127.0.0.1:8082/" # local api that can be used to query full benchmark STAC
-        STAC_OVERLAP_THRESHOLD_PERCENT = "40.0"
+        # STAC_API_URL            = "http://127.0.0.1:8082/" # local api that can be used to query full benchmark STAC
+        STAC_API_URL            = "http://benchmark-stac.test.nextgenwaterprediction.com:8000/" # STAC api served from AWS test account that can be used to query full benchmark STAC
+        STAC_OVERLAP_THRESHOLD_PERCENT = "90.0"
         STAC_DATETIME_FILTER  = "${NOMAD_META_stac_datetime_filter}"
         
         # Job Names for dispatching child jobs
@@ -102,7 +108,7 @@ job "pipeline" {
       }
 
       resources {
-        memory = 4000 
+        memory = 3000 
       }
 
       logs {

@@ -39,8 +39,8 @@ job "fim_mosaicker" {
       config {
         # use last known stable version in test
         image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-jobs-v0.2" 
-        force_pull = false
-        # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
+        # force_pull = false # use a cached image on client if available. To force a pull need to change back to force_pull = true
+        force_pull = true 
 
         auth {
           username = "ReadOnly_NGWPC_Group_Deploy_Token"
@@ -74,19 +74,20 @@ job "fim_mosaicker" {
         # AWS_SECRET_ACCESS_KEY = "${NOMAD_META_aws_secret_key}"
         # AWS_SESSION_TOKEN     = "${NOMAD_META_aws_session_token}"
 
-        GDAL_CACHEMAX         = "1024"
         
         # GDAL Configuration
-        GDAL_NUM_THREADS = "1" # set this to 1 esspecially if using vsis3.
+        GDAL_NUM_THREADS = "4"
         GDAL_TIFF_DIRECT_IO = "YES"
         GDAL_DISABLE_READDIR_ON_OPEN = "TRUE"
         CPL_LOG_ERRORS = "ON"
         CPL_VSIL_CURL_ALLOWED_EXTENSIONS = ".tif,.vrt"
-        VSI_CACHE_SIZE = "268435456"
+        VSI_CACHE_SIZE = "512000000" # s3 data cache size
+        GDAL_SWATH_SIZE = "4294967296"  # 4096 MB (4 GB) for translate operations and copying data between raster datasets
+        GDAL_CACHEMAX = "2048"
         CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE = "YES"
 
         # Set retry explicitely to ensure mosaic retries blocks when it hits s3 throttling.
-        GDAL_HTTP_MAX_RETRY =  "3"
+        GDAL_HTTP_MAX_RETRY =  "2"
         GDAL_HTTP_RETRY_DELAY = "5"
         GDAL_HTTP_RETRY_CODES =  "ALL"
         
@@ -102,7 +103,7 @@ job "fim_mosaicker" {
       }
 
       resources {
-        memory = 14000 #Be generous here to avoid OOM
+        memory = 14000 #Be generous here to avoid OOM. For 10m this should be 10 gb, 12 gb for 5m, 16-18gb for 10m 
       }
 
       logs {
