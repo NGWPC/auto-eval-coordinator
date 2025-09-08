@@ -17,5 +17,8 @@ pipeline_log.db
 viztracer-visualization.json
 pipeline_trace.json
 .data
+data/
+local-logs/
+local-reports/
 cache/aiohttp_cache.sqlite
 reports/

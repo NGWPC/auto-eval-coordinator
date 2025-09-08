@@ -91,8 +91,8 @@ job "pipeline" {
         
         # STAC Configuration
         # STAC_API_URL          = "http://127.0.0.1:8888/" # local test api
-        # STAC_API_URL            = "http://127.0.0.1:8082/" # local api that can be used to query full benchmark STAC
-        STAC_API_URL            = "http://benchmark-stac.test.nextgenwaterprediction.com:8000/" # STAC api served from AWS test account that can be used to query full benchmark STAC
+        STAC_API_URL            = "http://127.0.0.1:8082/" # local api that can be used to query full benchmark STAC
+        # STAC_API_URL            = "http://benchmark-stac.test.nextgenwaterprediction.com:8000/" # STAC api served from AWS test account that can be used to query full benchmark STAC
         STAC_OVERLAP_THRESHOLD_PERCENT = "90.0"
         STAC_DATETIME_FILTER  = "${NOMAD_META_stac_datetime_filter}"
         
@@ -115,6 +115,73 @@ job "pipeline" {
         max_files     = 5
         max_file_size = 20 # MB
       }
+    }
+    task "persist-logs" {
+      lifecycle {
+        hook = "poststop"
+        sidecar = false
+      }
+      
+      driver = "docker"
+      
+      config {
+        image = "docker.io/library/alpine:3.19.1"
+        privileged = true
+        command = "/bin/sh"
+        args = ["-c", <<-EOF
+          set -e
+          
+          # Extract batch name
+          BATCH_NAME=$(echo "${NOMAD_JOB_ID}" | sed -n 's/.*\[batch_name=\([^,]*\),.*/\1/p')
+          
+          # Create log directory for this job id
+          LOG_DIR="/persistent-logs/$BATCH_NAME/${NOMAD_JOB_ID}"
+          mkdir -p "$LOG_DIR"
+          
+          # Look for logs in the mounted Nomad data directory
+          ALLOC_LOG_DIR="/nomad-data/alloc/${NOMAD_ALLOC_ID}/alloc/logs"
+          
+          if [ -d "$ALLOC_LOG_DIR" ]; then
+            echo "Copying logs from $ALLOC_LOG_DIR to $LOG_DIR" 
+            cp -r "$ALLOC_LOG_DIR/"* "$LOG_DIR/" || true
+            
+            # Create metadata file with run information
+            {
+              echo "Job ID: ${NOMAD_JOB_ID}"
+              echo "BATCH_NAME: $BATCH_NAME"
+              echo "Allocation ID: ${NOMAD_ALLOC_ID}"
+              echo "AOI: ${NOMAD_META_aoi}"
+              echo "Outputs Path: ${NOMAD_META_outputs_path}"
+              echo "HAND Index Path: ${NOMAD_META_hand_index_path}"
+              echo "Benchmark Sources: ${NOMAD_META_benchmark_sources}"
+              echo "FIM Type: ${NOMAD_META_fim_type}"
+              echo "Tags: ${NOMAD_META_tags}"
+            } > "$LOG_DIR/run_metadata.txt"
+            
+            echo "Logs successfully persisted to $LOG_DIR"
+          else
+            echo "ERROR: Logs directory not found at $ALLOC_LOG_DIR"
+            exit 1
+          fi
+        EOF
+        ]
+        
+        # Mount the persistent logs directory and Nomad data directory
+        volumes = [
+          "${var.repo_root}/local-logs:/persistent-logs:rw",
+          "${var.repo_root}/.data/nomad/data:/nomad-data:ro"
+        ] 
+      }
+      
+      resources {
+        memory = 128
+        cpu = 100
+      }
+      
+      logs {
+        max_files = 5
+        max_file_size = 20
+      } 
     }
   }
 }

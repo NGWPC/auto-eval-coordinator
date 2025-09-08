@@ -26,7 +26,7 @@ plugin "docker" {
     # Disable automatic image cleanup
     gc {
       container = true # if true remove containers after tasks complete. If you don't remove you can see logs in /tmp
-      image = false          # Keep docker images cached locally so they don't dissappear
+      image = false          # Keep docker images cached locally so they don't dissappear. If you update an image you need to remove nomad's data directory to refresh the images on a local nomad cluster.
     }
   }
 }

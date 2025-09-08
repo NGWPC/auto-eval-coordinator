@@ -104,5 +104,87 @@ job "hand_inundator" {
         max_file_size = 10 # MB
       }
     }
+    task "persist-logs" {
+      lifecycle {
+        hook = "poststop"
+        sidecar = false
+      }
+      
+      driver = "docker"
+      
+      config {
+        image = "docker.io/library/alpine:3.19.1"
+        privileged = true
+        command = "/bin/sh"
+        args = ["-c", <<-EOF
+          set -e
+          
+          # Extract batch name
+          BATCH_NAME=$(echo "${NOMAD_JOB_ID}" | sed -n 's/.*\[batch_name=\([^,]*\),.*/\1/p')
+          
+          # Create log directory for this job id
+          LOG_DIR="/persistent-logs/$BATCH_NAME/${NOMAD_JOB_ID}"
+          mkdir -p "$LOG_DIR"
+          
+          # Debug: Check the mounted nomad-data directory structure
+          echo "=== Checking /nomad-data structure ==="
+          ls -la /nomad-data/ 2>/dev/null || echo "nomad-data not found"
+          
+          # Look for our allocation in the mounted Nomad data directory
+          ALLOC_LOG_DIR="/nomad-data/alloc/${NOMAD_ALLOC_ID}/alloc/logs"
+          
+          echo "=== Looking for logs at: $ALLOC_LOG_DIR ==="
+          
+          if [ -d "$ALLOC_LOG_DIR" ]; then
+            echo "Found logs at $ALLOC_LOG_DIR"
+            ls -la "$ALLOC_LOG_DIR"
+            
+            # Copy the logs
+            cp -r "$ALLOC_LOG_DIR/"* "$LOG_DIR/" || true
+            
+            # Create metadata file
+            {
+              echo "Job ID: ${NOMAD_JOB_ID}"
+              echo "BATCH_NAME: $BATCH_NAME"
+              echo "Allocation ID: ${NOMAD_ALLOC_ID}"
+              echo "Catchment Data Path: ${NOMAD_META_catchment_data_path}"
+              echo "Forecast Path: ${NOMAD_META_forecast_path}"
+              echo "Output Path: ${NOMAD_META_output_path}"
+              echo "FIM Type: ${NOMAD_META_fim_type}"
+            } > "$LOG_DIR/run_metadata.txt"
+            
+            echo "Logs successfully persisted to $LOG_DIR"
+          else
+            echo "No logs found at $ALLOC_LOG_DIR"
+            echo "Checking parent directories..."
+            echo "Contents of /nomad-data/alloc/${NOMAD_ALLOC_ID}:"
+            ls -la "/nomad-data/alloc/${NOMAD_ALLOC_ID}/" 2>/dev/null || echo "Allocation directory not found"
+            
+            echo "Contents of /nomad-data/alloc:"
+            ls -la "/nomad-data/alloc/" 2>/dev/null | head -10 || echo "No alloc directory"
+            
+            # Create placeholder
+            echo "No logs found at $(date)" > "$LOG_DIR/no_logs_found.txt"
+          fi
+        EOF
+        ]
+        
+        # Mount the persistent logs directory and Nomad data directory
+        volumes = [
+          "${var.repo_root}/local-logs:/persistent-logs:rw",
+          "${var.repo_root}/.data/nomad/data:/nomad-data:ro"
+        ] 
+      }
+      
+      resources {
+        memory = 128
+        cpu = 100
+      }
+      
+      logs {
+        max_files = 5
+        max_file_size = 10
+      } 
+    }
   }
 }

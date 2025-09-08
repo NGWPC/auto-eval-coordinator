@@ -6,7 +6,9 @@ services:
     image: autoeval-dev:latest
     volumes:
       - ./src:/app/src
-      - ./data:/data # for input/output data
+      - ./inputs:/app/inputs # batch STAC item run lists go here
+      - ./tools:/app/tools
+      - ./data:/data # for output data when outputting data locally
     environment:
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
