@@ -63,7 +63,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push image
+      - name: Build & push autoeval-coordinator image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -85,3 +85,26 @@ jobs:
           tags: |
             ${{ needs.setup.outputs.image_base }}:${{ needs.setup.outputs.test_image_tag }}
             ${{ needs.setup.outputs.image_base }}:latest
+
+      - name: Build & push local-nomad-server image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./local-nomad
+          file: ./local-nomad/Dockerfile
+          push: true
+          labels: |
+            org.opencontainers.image.title=Local Nomad Server
+            org.opencontainers.image.description=Local Nomad server for development
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.date.outputs.date }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.authors=${{ github.actor }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Your Organization
+            maintainer=${{ github.actor }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/local-nomad-server:${{ needs.setup.outputs.test_image_tag }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/local-nomad-server:latest
