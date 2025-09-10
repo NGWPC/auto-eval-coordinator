@@ -86,6 +86,10 @@ jobs:
             ${{ needs.setup.outputs.image_base }}:${{ needs.setup.outputs.test_image_tag }}
             ${{ needs.setup.outputs.image_base }}:latest
 
+      - name: Set lowercase owner
+        id: owner
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Build & push local-nomad-server image
         uses: docker/build-push-action@v6
         with:
@@ -106,5 +110,5 @@ jobs:
             org.opencontainers.image.vendor=Your Organization
             maintainer=${{ github.actor }}
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/local-nomad-server:${{ needs.setup.outputs.test_image_tag }}
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/local-nomad-server:latest
+            ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/local-nomad-server:${{ needs.setup.outputs.test_image_tag }}
+            ${{ env.REGISTRY }}/${{ steps.owner.outputs.owner }}/local-nomad-server:latest
