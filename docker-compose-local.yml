@@ -51,8 +51,8 @@ services:
       - 8889:8889
 
   nomad-server:
-    build: ./local-nomad
     container_name: nomad-server
+    image: local-nomad-server:latest
     privileged: true
     volumes:
       # Docker socket access required for Nomad to manage Docker containers as a task driver

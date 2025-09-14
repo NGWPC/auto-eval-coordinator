@@ -347,8 +347,8 @@ def main():
         base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
         logging.info(f"Using local output directory: {base_path}")
     else:
-        # Use S3 filesystem with fimc-data profile
-        fs = fsspec.filesystem("s3", profile="fimbucket")
+        # Use S3 filesystem
+        fs = fsspec.filesystem("s3")
         base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
         logging.info(f"Using S3 output path: {base_path}")
 
