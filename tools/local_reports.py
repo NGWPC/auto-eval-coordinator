@@ -14,8 +14,8 @@ def setup_arguments():
     parser = argparse.ArgumentParser(
         description="Analyzes local pipeline logs to categorize AOIs, providing detailed intermediate outputs for verification.",
         epilog="""Examples:
-  # Analyze logs in a batch directory
-  %(prog)s --run_list run_list.txt --batch_dir /path/to/batch_name --output_dir output_dir
+  # Analyze logs in a log directory
+  %(prog)s --run_list run_list.txt --log_dir /path/to/log_dir --report_dir /path/to/report_dir
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -26,16 +26,16 @@ def setup_arguments():
         help="Path to file containing list of AOIs to process",
     )
     parser.add_argument(
-        "--batch_dir",
+        "--log_dir",
         type=Path,
         required=True,
-        help="Path to batch directory containing logs",
+        help="Path to log directory containing logs",
     )
     parser.add_argument(
-        "--output_dir",
+        "--report_dir",
         type=Path,
         required=True,
-        help="Directory where ALL output files will be written",
+        help="Directory where ALL report files will be written",
     )
     return parser.parse_args()
 
@@ -94,7 +94,7 @@ def check_message_pattern(message: str, patterns: List[str]) -> bool:
     return False
 
 
-def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> Dict[str, Set[str]]:
+def analyze_job_logs(log_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> Dict[str, Set[str]]:
     """Analyzes logs for specific job/task pairs and categorizes AOIs."""
     results = {
         "success": set(),
@@ -104,7 +104,11 @@ def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> 
         "agr_mos_errors": set(),
         "inundate_errors": set(),
         "ignorable_errors": set(),
-        "all_messages": []  # For debugging/intermediate output
+        # Store error messages by category
+        "job_error_messages": [],
+        "agr_mos_error_messages": [],
+        "inundate_error_messages": [],
+        "ignorable_error_messages": []
     }
     
     # Pattern definitions
@@ -137,6 +141,7 @@ def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> 
         r"NotGeoreferencedWarning",
         r"distributed\.comm\.core\.CommClosedError",
         r"UserWarning: Sending large graph",
+	r"is already in use",
         r"warnings\.warn",
         r"has GPKG application_id",
         r"distributed\.nanny - WARNING - Worker process still alive"
@@ -157,7 +162,7 @@ def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> 
     
     
     # Iterate through job directories (agreement_maker, fim_mosaicker, etc.)
-    job_type_dirs = list(batch_dir.iterdir())
+    job_type_dirs = list(log_dir.iterdir())
   
     
     for job_type_dir in job_type_dirs:
@@ -198,14 +203,14 @@ def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> 
                 for msg in messages:
                     msg_text = msg.get("message", "") if isinstance(msg, dict) else str(msg)
                     
-                    # Store all messages for debugging
-                    results["all_messages"].append({
+                    # Create message info object for tracking
+                    message_info = {
                         "aoi": aoi_name,
                         "job": matching_job,
                         "task": matching_task,
-                        "file": str(stderr_file),
+                        "file": str(stderr_file.relative_to(log_dir)),  # Use relative path for cleaner output
                         "message": msg_text
-                    })
+                    }
                     
                     # Check for pipeline status
                     if matching_job == "pipeline":
@@ -217,26 +222,30 @@ def analyze_job_logs(batch_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> 
                             results["failed"].add(aoi_name)
                         elif check_message_pattern(msg_text, job_error_patterns):
                             results["job_errors"].add(aoi_name)
+                            results["job_error_messages"].append(message_info)
                     
                     # Check for agreement_maker/fim_mosaicker errors
                     elif matching_job in ["agreement_maker", "fim_mosaicker"]:
                         if check_message_pattern(msg_text, agr_mos_error_patterns):
                             if not check_message_pattern(msg_text, agr_mos_exclude_patterns):
                                 results["agr_mos_errors"].add(aoi_name)
+                                results["agr_mos_error_messages"].append(message_info)
                         if check_message_pattern(msg_text, ignorable_patterns):
                             results["ignorable_errors"].add(aoi_name)
+                            results["ignorable_error_messages"].append(message_info)
                     
                     # Check for hand_inundator errors
                     elif matching_job == "hand_inundator":
                         if check_message_pattern(msg_text, inundate_error_patterns):
                             if not check_message_pattern(msg_text, inundate_exclude_patterns):
                                 results["inundate_errors"].add(aoi_name)
+                                results["inundate_error_messages"].append(message_info)
     
     return results
 
 
 def write_aois_to_file(file_path: Path, aois: Set[str]):
-    """Writes a sorted set of AOIs to a text file."""
+    """Writes a sorted set of AOIs to a text file in the report directory."""
     print(f"  Writing {len(aois)} AOIs to {file_path}")
     with file_path.open("w") as f:
         for aoi in sorted(list(aois)):
@@ -244,8 +253,8 @@ def write_aois_to_file(file_path: Path, aois: Set[str]):
 
 
 def write_data_to_json(file_path: Path, data):
-    """Writes data to a pretty-printed JSON file."""
-    print(f"  Writing data to {file_path}")
+    """Writes data to a pretty-printed JSON file in the report directory."""
+    print(f"  Writing {len(data) if isinstance(data, list) else 'data'} items to {file_path}")
     with file_path.open("w") as f:
         json.dump(data, f, indent=2, default=str)
 
@@ -258,15 +267,15 @@ def main():
         print(f"Error: Run list file not found: {args.run_list}", file=sys.stderr)
         sys.exit(1)
     
-    if not args.batch_dir.is_dir():
-        print(f"Error: Batch directory not found: {args.batch_dir}", file=sys.stderr)
+    if not args.log_dir.is_dir():
+        print(f"Error: Log directory not found: {args.log_dir}", file=sys.stderr)
         sys.exit(1)
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.report_dir.mkdir(parents=True, exist_ok=True)
     
-    batch_name = args.batch_dir.name
+    batch_name = args.log_dir.name
     print(f"Starting analysis for batch: {batch_name}")
-    print(f"Batch directory: {args.batch_dir}")
+    print(f"Log directory: {args.log_dir}")
     
 
     # Define job/task pairs to analyze
@@ -280,22 +289,30 @@ def main():
     
     # Analyze logs
     print("\nAnalyzing local log files...")
-    results = analyze_job_logs(args.batch_dir, job_task_pairs)
+    results = analyze_job_logs(args.log_dir, job_task_pairs)
     
-    # Write intermediate files
+    # Write intermediate files - AOI lists
     for category in ["success", "early_exit", "failed", "job_errors", 
                      "agr_mos_errors", "inundate_errors"]:
         if category in results:
-            write_aois_to_file(args.output_dir / f"{category}_aois.txt", results[category])
+            write_aois_to_file(args.report_dir / f"{category}_aois.txt", results[category])
     
-    # Write all messages for debugging (optional, can be large)
-    if results.get("all_messages"):
-        write_data_to_json(args.output_dir / "all_messages.json", results["all_messages"])
+    # Write error message JSON files for each error category
+    error_categories = [
+        ("job_error_messages", "job_errors.json"),
+        ("agr_mos_error_messages", "agr_mos_errors.json"),
+        ("inundate_error_messages", "inundate_errors.json"),
+        ("ignorable_error_messages", "ignorable_errors.json")
+    ]
+    
+    for message_key, json_filename in error_categories:
+        if results.get(message_key):
+            write_data_to_json(args.report_dir / json_filename, results[message_key])
     
     # --- Categorize AOIs using set logic ---
     print("\nCategorizing all AOIs...")
     initial_aois = {line.strip() for line in args.run_list.open() if line.strip()}
-    write_aois_to_file(args.output_dir / "sorted-run-list.txt", initial_aois)
+    write_aois_to_file(args.report_dir / "sorted-run-list.txt", initial_aois)
 
     successful_aois = results["success"].copy()
     successful_aois.update(results["early_exit"])
@@ -305,7 +322,7 @@ def main():
     silent_failures = initial_aois - all_found_aois
     
     # Write the silent failures list
-    write_aois_to_file(args.output_dir / "silent_failures.txt", silent_failures)
+    write_aois_to_file(args.report_dir / "silent_failures.txt", silent_failures)
 
     failed_aois.update(silent_failures)
     failed_aois.update(results["job_errors"])
@@ -317,7 +334,7 @@ def main():
     # AOIs with ignorable errors but no real errors should be considered successful
     real_error_aois = results["agr_mos_errors"].union(results["inundate_errors"])
     truly_ignorable = results["ignorable_errors"] - real_error_aois
-    write_aois_to_file(args.output_dir / "ignorable_errors_aois.txt", truly_ignorable)
+    write_aois_to_file(args.report_dir / "ignorable_errors_aois.txt", truly_ignorable)
     successful_aois.update(truly_ignorable)
     failed_aois -= truly_ignorable
 
@@ -331,14 +348,14 @@ def main():
     print(f"Total processed: {total_output}\n")
 
     # Write final output files
-    write_aois_to_file(args.output_dir / "unique_success_aoi_names.txt", successful_aois)
-    write_aois_to_file(args.output_dir / "unique_fail_aoi_names.txt", failed_aois)
+    write_aois_to_file(args.report_dir / "unique_success_aoi_names.txt", successful_aois)
+    write_aois_to_file(args.report_dir / "unique_fail_aoi_names.txt", failed_aois)
 
     if len(initial_aois) != total_output:
         missing_aois = initial_aois - successful_aois - failed_aois
         print(f"WARNING: Input count ({len(initial_aois)}) does not match output count ({total_output})!")
         print(f"Missing AOIs: {len(missing_aois)}")
-        write_aois_to_file(args.output_dir / "missing_aois.txt", missing_aois)
+        write_aois_to_file(args.report_dir / "missing_aois.txt", missing_aois)
     else:
         print("All AOIs accounted for!")
 
