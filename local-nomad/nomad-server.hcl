@@ -5,6 +5,12 @@ server {
   enabled = true
   # bootstrap_expect = 1 means this is a single-node cluster that doesn't need to wait for other servers
   bootstrap_expect = 1
+
+  # Garbage collection settings
+  job_gc_interval = "30m"      # Run GC every X interval (also controls eval GC interval)
+  job_gc_threshold = "1h"      # Length of time for which evaluations must be terminal
+  eval_gc_threshold = "1h"      # Evaluations must be terminal for X amount of time before eligible for GC
+  batch_eval_gc_threshold = "1h"  # Batch job evaluations must be terminal for X amount of time before GC
 }
 client {
   enabled = true
