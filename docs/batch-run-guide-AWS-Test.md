@@ -38,7 +38,7 @@ You should execute the batch code from this container's shell.
 
 ## Configure Nomad Job definitions
 
-Most of the environment variables in ./job_defs/test/ should already be configured but if you are using a different NOMAD_ADDRESS from the one used by NGWPC then you should set that as well. Depending on the data being evaluated you might also want to adjust the job memory requirements in the "resources" block of the job definition.
+Most of the environment variables in ./job_defs/test/ should already be configured but if you are using a different NOMAD_ADDRESS from the one used by NGWPC then you should set that as well. Depending on the data being evaluated you might also want to adjust the job memory requirements in the "resources" block of the job definition. Please refer to the document docs/job_sizing_guide.md in this repo for guidance on how much memory to allocate to each autoeval-job based on the resolution of the data being evaluated.
 
 ## Start the nomad memory monitor script
 

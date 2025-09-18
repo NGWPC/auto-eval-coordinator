@@ -102,7 +102,56 @@ Refer to docs/intepreting-reports.md for more information on using a batch's rep
 
 ## Purge jobs
 
+After you have assessed the outcome of a batch then it can be helpful to remove the jobs from the current batch in the Nomad API so that another batch can be run without the output from the previous batches jobs confusing the status of the next batch. Old jobs also increase the amount of memory being used by Nomad. Old Jobs should automatically be removed by the API after approx. 1 hr. Manual removal of the previously run jobs from the API can also be done by purging the jobs with the following command:
+
+```
+docker run --rm \
+  --network host \
+  --entrypoint="" \
+  -v $(pwd)/tools:/app/tools \
+  -e NOMAD_ADDR \
+  autoeval-coordinator:local \
+  python /app/tools/purge_dispatch_jobs.py
+```
 
 ## Troubleshooting
 
-If a docker run command fails then it can be helpful to substitute a bash command for the command that is failing in an interactive terminal Docker session and then run the command that is failing from the terminal. For example:
+If a docker run command fails then it can be helpful to substitute a bash command for the command that is failing in an interactive terminal Docker session and then run the command that is failing from the terminal. For example, to troubleshoot the reporting command you can change:
+
+```
+docker run --rm \
+  --entrypoint="" \
+  -v $(pwd)/tools:/app/tools \
+  -v $(pwd)/inputs:/app/inputs \
+  -v $(pwd)/local-logs:/app/local-logs \
+  -v $(pwd)/local-reports:/app/local-reports \
+  autoeval-coordinator:local \
+  python tools/local_reports.py \
+   --run_list inputs/test-run.txt \
+   --log_dir local-logs/pw_test_run \
+   --report_dir local-reports/pw_test_run
+```
+
+to:
+
+```
+docker run --rm -it \
+  --entrypoint="" \
+  -v $(pwd)/tools:/app/tools \
+  -v $(pwd)/inputs:/app/inputs \
+  -v $(pwd)/local-logs:/app/local-logs \
+  -v $(pwd)/local-reports:/app/local-reports \
+  autoeval-coordinator:local \
+  bash
+```
+
+And then run:
+
+```
+python tools/local_reports.py \
+ --run_list inputs/test-run.txt \
+ --log_dir local-logs/pw_test_run \
+ --report_dir local-reports/pw_test_run
+```
+
+from within the interactive terminal. Besides being able to run the command multiple times after editing the script you can also use ipdb and any other debugging tools.
