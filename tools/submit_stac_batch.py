@@ -344,12 +344,12 @@ def main():
     if args.use_local_output:
         # Use local filesystem
         fs = fsspec.filesystem("file")
-        base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
+        base_path = f"{args.output_root.rstrip('/')}/AOIs"
         logging.info(f"Using local output directory: {base_path}")
     else:
         # Use S3 filesystem
         fs = fsspec.filesystem("s3")
-        base_path = f"{args.output_root.rstrip('/')}/{args.batch_name}/stac_aois"
+        base_path = f"{args.output_root.rstrip('/')}/AOIs"
         logging.info(f"Using S3 output path: {base_path}")
 
     # Create output directory if using local filesystem
