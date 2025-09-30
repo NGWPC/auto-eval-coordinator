@@ -1,109 +1,88 @@
-#### OWP Open Source Project Template Instructions
+## Autoeval Coordinator
+### Description  
+This repository contains an evaluation pipeline that works with HashiCorp Nomad to evaluate HAND generated extent flood inundation maps (FIMs) against benchmark FIMs. It takes a gpkg containing either a polygon or multipolygon geometry and then uses that to run and monitor batch jobs for each step along a FIM evaluation pipeline that evaluates flood scenarios for benchmark sources that intersect the AOI submitted by the user. 
 
-1. Create a new project.
-2. [Copy these files into the new project](#installation)
-3. Update the README, replacing the contents below as prescribed.
-4. Add any libraries, assets, or hard dependencies whose source code will be included
-   in the project's repository to the _Exceptions_ section in the [TERMS](TERMS.md).
-  - If no exceptions are needed, remove that section from TERMS.
-5. If working with an existing code base, answer the questions on the [open source checklist](opensource-checklist.md)
-6. Delete these instructions and everything up to the _Project Title_ from the README.
-7. Write some great software and tell people about it.
+The repository also contains a directory `tools/`, that assists the user in running batches of evaluation pipelines, evaluating the results of a batch, and working with the Nomad API.
 
-> Keep the README fresh! It's the first thing people see and will make the initial impression.
+While the current evaluation pipeline is primarily designed to generate HAND FIM extents or depths and then evaluate these against relevant benchmark sources it is possible that more pipelines will be added in the future to allow for evaluations of more types of FIMs or for different types of FIM evaluations.
 
-## Installation
+### Getting Started Locally
+1. Create `.env` file
+2. Run `mkdir -p ./.data/nomad/data`
+3. Build the local Nomad server image with `docker build -t local-nomad-server:latest -f ./local-nomad/Dockerfile ./local-nomad`
+4. Run `docker compose -f docker-compose-local.yml up`
+5. Register Jobs (see ./local-nomad/README.md)
+6. Load the test stac data by running `./testdata/benchmark/load-test-stac-data.sh`
+7. Create required container images from autoeval-jobs repo. Once cloned the autoeval-jobs repo and inside it, execute `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
+8. Build the container image inside this repo with `docker build -t autoeval-coordinator:local .`
+9. Dispatch a pipeline job through Nomad UI or API (see example below)
 
-To install all of the template files, run the following script from the root of your project's directory:
+**Tips for working with .env files:**
+- The example.env is a good place to look to make a .env file that is configured for local deployment. This .env file can be stored as .env.local when not in use and copied to .env when local deployment is desired. Depending on which deployment configuration is desired different .env files can be saved locally within the repo without being tracked by git. For example, you could also have a .env.test environment file for deploying to the AWS Test account. 
+
+**Example command for dispatching job in the local environment:**
+
+Once you have gone through the steps above to spin up a local environment you can run a pipeline job with the test data using the following command:
 
 ```
-bash -c "$(curl -s https://raw.githubusercontent.com/NOAA-OWP/owp-open-source-project-template/open_source_template.sh)"
+docker exec nomad-server nomad job dispatch -meta="aoi=/testdata/query-polygon.gpkg" -meta="outputs_path=/outputs/test-run" -meta="hand_index_path=/testdata/hand/parquet-index/" -meta="benchmark_sources=usgs-fim-collection" -meta="tags=batch_name=HAND-V2 aoi_name=01080203-shvm3-usgs another_tag=dff" pipeline
 ```
 
-----
+If you prefer to use curl from your host machine then the request to post the job using the Nomad API is:
 
-# Project Title
+```
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Meta": {
+      "aoi": "/testdata/query-polygon.gpkg",
+      "outputs_path": "/outputs/test-run",
+      "hand_index_path": "/testdata/hand/parquet-index/",
+      "benchmark_sources": "usgs-fim-collection",
+      "tags": "batch_name=HAND-V2 aoi_name=01080203-shvm3-usgs another_tag=dff"
+    },
+    "IdPrefixTemplate": "[batch_name=HAND-V2,aoi_name=01080203-shvm3-usgs,another_tag=dff]"
+  }' \
+  http://localhost:4646/v1/job/pipeline/dispatch
+```
 
-**Description**:  Put a meaningful, short, plain-language description of what
-this project is trying to accomplish and why it matters.
-Describe the problem(s) this project solves.
-Describe how this software can improve the lives of its audience.
+This version can also be adapted to dispatch jobs to non-local Nomad servers.
 
-Other things to include:
+### Arguments
+- **HAND Version** 
+  - The HAND version argument allows the user to specify a specific version of HAND to generate extents for. This argument is required.
+- **Benchmark Source** 
+  - This is a string that select which source will be used to evaluate HAND against. For example 'ripple-mip' will be used to select FEMA MIP data produced by ripple. This argument is required.
+- **hand_index_path**
+  - This argument provides the location the HAND index used to spatially query a given set of HAND outputs. The NGWPC hand-index repo contains more information about generating a HAND index for use in an evaluation.
+- **Date Range** 
+  - Certain Benchmark sources contain flood scenarios that have a time component to them. For example high water mark data is associated with the flood  event associated with a given survey. This argument allows for filtering a Benchmark source to only return benchmark data within a certain date range.
+ 
+### Inputs
+- **AOI**
+  - This input is a geopackage that must contain either a polygon or multipolygon geometry. For every polygon the coordinator will generate a HAND extent and find benchmark data that lies within the polygon for the source selected by the user. The coordinator will then run all the rest of the jobs described in this repository to generate an evaluation for that polygon. 
 
-  - **Technology stack**: Indicate the technological nature of the software, including primary programming language(s) and whether the software is intended as standalone or as a module in a framework or other ecosystem.
-  - **Status**:  Alpha, Beta, 1.1, etc. It's OK to write a sentence, too. The goal is to let interested people know where this project is at. This is also a good place to link to the [CHANGELOG](CHANGELOG.md).
-  - **Links to production or demo instances**
-  - Describe what sets this apart from related-projects. Linking to another doc or page is OK if this can't be expressed in a sentence or two.
+### Outputs
+- **output_path**
+  This is the directory where the outputs of a pipeline will be written. The outputs written to this directory follow this format (here <test-case-id> is synonymous with <aoi-id>:
 
-
-**Screenshot**: If the software has visual components, place a screenshot after the description; e.g.,
-
-![](https://raw.githubusercontent.com/NOAA-OWP/owp-open-source-project-template/master/doc/Screenshot.png)
-
-
-## Dependencies
-
-Describe any dependencies that must be installed for this software to work.
-This includes programming languages, databases or other storage mechanisms, build tools, frameworks, and so forth.
-If specific versions of other software are required, or known not to work, call that out.
-
-## Installation
-
-Detailed instructions on how to install, configure, and get the project running.
-This should be frequently tested to ensure reliability. Alternatively, link to
-a separate [INSTALL](INSTALL.md) document.
-
-## Configuration
-
-If the software is configurable, describe it in detail, either here or in other documentation to which you link.
-
-## Usage
-
-Show users how to use the software.
-Be specific.
-Use appropriate formatting when showing code snippets.
-
-## How to test the software
-
-If the software includes automated tests, detail how to run those tests.
-
-## Known issues
-
-Document any known significant shortcomings with the software.
-
-## Getting help
-
-Instruct users how to get help with this software; this might include links to an issue tracker, wiki, mailing list, etc.
-
-**Example**
-
-If you have questions, concerns, bug reports, etc, please file an issue in this repository's Issue Tracker.
-
-## Getting involved
-
-This section should detail why people should get involved and describe key areas you are
-currently focusing on; e.g., trying to get feedback on features, fixing certain bugs, building
-important pieces, etc.
-
-General instructions on _how_ to contribute should be stated with a link to [CONTRIBUTING](CONTRIBUTING.md).
+  - <test-case-id>/: the unique identifier, or test case, for the category of benchmark data used to generate metrics. For the PI7 ripple eval data this corresponds to a STAC item id in a given benchmark STAC collection. This could also be an ID for an AOI that returns multiple STAC items from the Benchmark STAC when used as a query AOI. In the example output the <test-case-id> is the STAC item id “11090202-ble” from the “ble-collection" benchmark stac collection.  
+  - <test-case-id>__agg_metrics.csv: aggregated metrics for the test case. 
+  - <test-case-id>__logs.txt: test case logs generated by the Pipeline 
+  - <test-case-id>__results.json: A file containing metadata and references to written output file locations 
+  - catchment_data_indices/: This directory contains files that point to catchment HAND data for each HAND catchment that will be inundated to compare to the benchmark scenarios being evaluated against 
+    - catchment-<unique-catchment-id>.parquet: Files in this directory will be parquet files that contain the UUID assigned to that catchment in the HAND index 
+  - <benchmark_type>/: This directory name is a shortened reference to the Benchmark STAC collection that the benchmark data for this evaluation was queried from. It is possible for a single AOI or test case to be evaluated against multiple benchmark collections so in some cases there could be multiple directories of this type with each directory containing evaluation results for that benchmark collections 
+  - <scenario>/: Test case scenario, e.g., “ble-100yr”  
+    - <test_case_id>-<scenario>__agreement.tif: The agreement raster for this scenario 
+    - <test_case_id>-<scenario>__benchmark_mosiac.tif: The mosaiced benchmark raster used as the benchmark raster 
+    - <test_case_id>-<scenario>__flowfile.csv: The merged flowfile used for this scenario 
+    - <test_case_id>-<scenario>__inundate_mosiac.tif: The mosaiced HAND extent used as the candidate raster for this scenario 
+    - <test_case_id>-<scenario>__metrics.csv: A single row CSV containing the metrics for this scenario. These CSV’s are aggregated together along with additional metadata to create the test cases agg_metrics.csv file 
+    - catchment_extents/ 
+      - <test_case_id>__<unique-catchment-id>.tif: The HAND extents for a single HAND catchment. These are merged together to form the inundate_mosaic.tif for the scenario 
 
 
-----
+### Running a batch of pipelines
 
-## Open source licensing info
-
-These links must be included in the final version of your project README (keep this section,
-as is, but remove this sentence):
-
-1. [TERMS](TERMS.md)
-2. [LICENSE](LICENSE)
-
-
-----
-
-## Credits and references
-
-1. Projects that inspired you
-2. Related projects
-3. Books, papers, talks, or other sources that have meaningful impact or influence on this project
+The above instructions are for running a single test evaluation pipeline using a local nomad cluster. If you know which HAND outputs you want to evaluate and where its HAND index is located and you have access to the FIM Benchmark STAC this should be sufficient to run single pipelines. This repository also contains functionality for running batches of dozens to thousands of pipelines using either a local Nomad cluster running within the Parallel Works environment or a Nomad cluster deployed to the NGWPC AWS Test account. For more information on running batches please refer to `docs/batch-run-guide-ParallelWorks.md` and `docs/batch-run-guide-AWS-Test.md`.

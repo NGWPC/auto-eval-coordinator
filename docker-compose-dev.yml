@@ -1,0 +1,15 @@
+services:
+  autoeval-dev:
+    build:
+      context: .
+      target: dev
+    image: autoeval-dev:latest
+    volumes:
+      - ./src:/app/src
+      - ./inputs:/app/inputs # batch STAC item run lists go here
+      - ./tools:/app/tools
+      - ./data:/data # for output data when outputting data locally
+    env_file:
+      - .env
+    entrypoint: [ sleep, infinity ]
+    network_mode: host
