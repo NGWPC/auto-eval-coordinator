@@ -5,7 +5,7 @@
 
 set -e
 
-STAC_API_URL="http://localhost:8888"
+STAC_API_URL="http://localhost:8082"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Loading STAC collection..."
