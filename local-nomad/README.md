@@ -7,7 +7,7 @@ docker run --rm --name nomad-job-registrar \
   -v "$(pwd):/repo:ro" \
   -e "NOMAD_ADDR=http://nomad-server:4646" \
   -e "REPO_ROOT=$(pwd)" \
-  --network autoeval-coordinator_autoeval-net \
+  --network auto-eval-coordinator_autoeval-net \
   --entrypoint /bin/sh \
   $(docker build -q -f ./local-nomad/Dockerfile ./local-nomad) \
   -c "/usr/local/bin/register-jobs.sh"
