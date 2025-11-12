@@ -340,18 +340,11 @@ def main():
         f"Successfully extracted {len(item_files)} STAC item geometries"
     )
 
-    # Initialize appropriate filesystem based on output mode
-    if args.use_local_output:
-        # Use local filesystem
-        fs = fsspec.filesystem("file")
-        base_path = f"{args.output_root.rstrip('/')}/AOIs"
-        logging.info(f"Using local output directory: {base_path}")
-    else:
-        # Use S3 filesystem
-        fs = fsspec.filesystem("s3")
-        base_path = f"{args.output_root.rstrip('/')}/AOIs"
-        logging.info(f"Using S3 output path: {base_path}")
-
+    # Simplified using url_to_fs - no need for separate S3/local branches
+    fs, _ = fsspec.core.url_to_fs(args.output_root)
+    base_path = f"{args.output_root.rstrip('/')}/AOIs"
+    logging.info(f"Using output path: {base_path}")
+    
     # Create output directory if using local filesystem
     if args.use_local_output:
         fs.makedirs(base_path, exist_ok=True)

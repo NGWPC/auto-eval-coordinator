@@ -519,17 +519,16 @@ class DataService:
             ) from e
 
     def _sync_check_file_exists(self, uri: str) -> bool:
-        """Synchronous helper to check if file exists (S3 or local)."""
+    """Synchronous helper to check if file exists (S3 or local)."""
         try:
+            # Use thread-safe credential access for S3 operations
+            storage_opts = {}
             if uri.startswith("s3://"):
-                # Use thread-safe credential access for S3 operations
                 with self._credential_lock:
-                    s3_opts = self._s3_options.copy()
-                fs = fsspec.filesystem("s3", **s3_opts)
-                return fs.exists(uri)
-            else:
-                # Local file
-                return Path(uri).exists()
+                    storage_opts = self._s3_options.copy()
+
+            fs, _ = fsspec.core.url_to_fs(uri, **storage_opts)
+            return fs.exists(uri)
         except (FileNotFoundError, NoCredentialsError, ClientError) as e:
             logging.debug(
                 f"File {uri} does not exist or is not accessible: {e}"
@@ -591,22 +590,21 @@ class DataService:
         metrics_files = []
 
         try:
+            # Use thread-safe credential access for S3 operations
+            storage_opts = {}
             if base_path.startswith("s3://"):
-                # Use thread-safe credential access for S3 operations
                 with self._credential_lock:
-                    s3_opts = self._s3_options.copy()
-                fs = fsspec.filesystem("s3", **s3_opts)
-                # Use glob to find all metrics.csv files recursively (including tagged versions)
-                pattern = f"{base_path.rstrip('/')}/**/*__metrics.csv"
-                metrics_files = fs.glob(pattern)
-                # Add s3:// prefix back since glob strips it
+                    storage_opts = self._s3_options.copy()
+
+            fs, _ = fsspec.core.url_to_fs(base_path, **storage_opts)
+
+            # Use glob to find all metrics.csv files recursively (including tagged versions)
+            pattern = f"{base_path.rstrip('/')}/**/*__metrics.csv"
+            metrics_files = fs.glob(pattern)
+
+            # For S3, glob returns paths without scheme, so add it back
+            if base_path.startswith("s3://"):
                 metrics_files = [f"s3://{path}" for path in metrics_files]
-            else:
-                base_path_obj = Path(base_path)
-                if base_path_obj.exists():
-                    metrics_files = [
-                        str(p) for p in base_path_obj.glob("**/*__metrics.csv")
-                    ]
 
             logging.info(
                 f"Found {len(metrics_files)} metrics.csv files in {base_path}"
