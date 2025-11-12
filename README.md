@@ -48,6 +48,24 @@ curl -X POST \
 
 This version can also be adapted to dispatch jobs to non-local Nomad servers.
 
+### Testing
+
+This repository includes containerized unit tests for the pipeline. Currently there are tests for the metrics deduplication functionality and error handling in `metrics_aggregator.py` to ensure pipeline idempotency.
+
+**Running the tests:**
+
+To run all tests in a containerized environment:
+
+```bash
+docker compose -f docker-compose-test.yml up --abort-on-container-exit
+```
+
+This will:
+- Build a container using the existing `dev` stage from the Dockerfile
+- Mount the source code, tests, and unit test data
+- Run pytest with coverage reporting
+- Exit automatically when tests complete
+
 ### Arguments
 - **HAND Version** 
   - The HAND version argument allows the user to specify a specific version of HAND to generate extents for. This argument is required.

@@ -179,7 +179,11 @@ class MetricsAggregator:
             # Try case-insensitive match
             for scenario_key, scenario_data in scenarios.items():
                 if scenario_key.lower() == scenario_name.lower():
-                    return scenario_data.get("stac_items", []), scenario_data.get("gauge"), scenario_data.get("hucs", [])
+                    return (
+                        scenario_data.get("stac_items", []),
+                        scenario_data.get("gauge"),
+                        scenario_data.get("hucs", []),
+                    )
 
         logger.warning(f"No STAC items found for {collection_name}/{scenario_name}")
         return [], None, []
@@ -249,6 +253,16 @@ class MetricsAggregator:
         # Define metadata columns
         meta_cols = ["collection_id", "stac_item_id", "scenario", "flow", "nws_lid", "hucs"]
 
+        # Validate required index columns
+        index_cols = ["collection_id", "stac_item_id", "scenario"]
+        for df_name, df in [("existing", existing_df), ("new", new_df)]:
+            if not df.empty:
+                for col in index_cols:
+                    if col not in df.columns:
+                        raise ValueError(f"Missing required index column '{col}' in {df_name} DataFrame")
+                    if df[col].isna().any():
+                        raise ValueError(f"Required index column '{col}' contains null values in {df_name} DataFrame")
+
         # Auto-detect metrics columns (numeric columns not in metadata)
         metrics_cols = [
             col for col in new_df.columns if col not in meta_cols and pd.api.types.is_numeric_dtype(new_df[col])
@@ -258,7 +272,7 @@ class MetricsAggregator:
             logger.warning("No numeric metrics columns found, appending all new data")
             return pd.concat([existing_df, new_df], ignore_index=True)
 
-        # Tag source and compute metadata completeness score
+        # Tag source dataframe
         existing_df = existing_df.copy()
         existing_df["_source"] = "existing"
         new_df = new_df.copy()
@@ -286,11 +300,20 @@ class MetricsAggregator:
         combined = combined.sort_values(by=sort_cols, ascending=ascending)
 
         # Drop duplicates on key metadata + rounded metrics columns, keeping the first (best) row
-        key_cols = ["collection_id", "scenario"] + rounded_metric_cols
+        key_cols = ["collection_id", "stac_item_id", "scenario"] + rounded_metric_cols
         final_df = combined.drop_duplicates(subset=key_cols, keep="first")
 
         # Clean up temporary columns
         final_df = final_df.drop(columns=["_source", "_meta_count", "_is_new"] + rounded_metric_cols)
+
+        # Validate no duplicates remain based on index columns
+        duplicate_check = final_df[final_df.duplicated(subset=index_cols, keep=False)]
+        if not duplicate_check.empty:
+            logger.error(f"Found {len(duplicate_check)} duplicate rows after deduplication")
+            raise ValueError(
+                f"Deduplication failed: {len(duplicate_check)} duplicate rows remain based on "
+                f"index columns {index_cols}. This indicates a bug in the deduplication logic."
+            )
 
         rows_removed = len(existing_df) + len(new_df) - len(final_df)
         logger.info(f"Merged dataframes: removed {rows_removed} duplicate rows based on metrics")

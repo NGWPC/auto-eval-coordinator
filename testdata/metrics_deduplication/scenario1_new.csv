@@ -1,0 +1,2 @@
+collection_id,stac_item_id,scenario,flow,nws_lid,hucs,ACC,CSI,F1_SCORE,TPR,TNR
+ble-collection,12030112-ble,100yr,/path/to/flow4.csv,LID004,12030112,0.9200000000,0.5100000000,0.6700000000,0.5300000000,0.9850000000
