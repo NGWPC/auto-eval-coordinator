@@ -75,16 +75,12 @@ class MetricsAggregator:
             try:
                 # Extract collection name and scenario from path
                 # Path structure: base/COLLECTION/SCENARIO/metrics.csv
-                if metrics_file.startswith("s3://"):
-                    # For S3 paths, split by '/' and get the last components
-                    path_parts = metrics_file.rstrip("/").split("/")
-                    scenario_name = path_parts[-2]  # Second to last part
-                    collection_name = path_parts[-3]  # Third to last part
-                else:
-                    # For local paths, use Path
-                    path_obj = Path(metrics_file)
-                    scenario_name = path_obj.parent.name
-                    collection_name = path_obj.parent.parent.name
+                fs, path = url_to_fs(metrics_file)
+
+                # Can use string splitting since fsspec always uses forward slashes
+                path_parts = path.rstrip("/").split("/")
+                scenario_name = path_parts[-2]
+                collection_name = path_parts[-3]
 
                 # Read the metrics CSV using fsspec.open (works for both local and S3)
                 with fsspec.open(
@@ -179,7 +175,11 @@ class MetricsAggregator:
             # Try case-insensitive match
             for scenario_key, scenario_data in scenarios.items():
                 if scenario_key.lower() == scenario_name.lower():
-                    return scenario_data.get("stac_items", []), scenario_data.get("gauge"), scenario_data.get("hucs", [])
+                    return (
+                        scenario_data.get("stac_items", []),
+                        scenario_data.get("gauge"),
+                        scenario_data.get("hucs", []),
+                    )
 
         logger.warning(f"No STAC items found for {collection_name}/{scenario_name}")
         return [], None, []
