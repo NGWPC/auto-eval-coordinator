@@ -21,22 +21,20 @@ def get_stac_item_directories(batch_root: str) -> List[tuple[str, str]]:
     stac_item_dirs = []
 
     # Unified approach for both S3 and local filesystems
-    fs, _ = fsspec.core.url_to_fs(output_root)
+    fs, _ = fsspec.core.url_to_fs(batch_root)
     try:
-        items = fs.ls(output_root, detail=True)
+        items = fs.ls(batch_root, detail=True)
         for item in items:
             if item["type"] == "directory":
                 stac_item_code = item["name"].split("/")[-1]
-                full_path = item["name"]
-                # Ensure the path has the proper scheme prefix if needed
-                if not full_path.startswith(("s3://", "/")) and output_root.startswith("s3://"):
-                    full_path = f"s3://{full_path}"
+                # Use fs.unstrip_protocol to properly reconstruct the full path
+                full_path = fs.unstrip_protocol(item["name"])
                 if not full_path.endswith("/"):
                     full_path += "/"
                 stac_item_dirs.append((stac_item_code, full_path))
     except Exception as e:
-        logger.error(f"Error listing directories in {output_root}: {e}")
-    
+        logger.error(f"Error listing directories in {batch_root}: {e}")
+
     return stac_item_dirs
 
 
@@ -96,13 +94,7 @@ def aggregate_metrics(batch_root: str, calb: bool, hand_version: str, resolution
     logger.info(f"Found {len(stac_item_dirs)} STAC item directories")
 
     for stac_item_code, stac_item_path in stac_item_dirs:
-        if stac_item_path.startswith("s3://"):
-            agg_metrics_path = f"{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
-        elif batch_root.startswith("s3://"):
-            # Handle case where stac_item_path doesn't have s3:// prefix but batch_root does
-            agg_metrics_path = f"s3://{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
-        else:
-            agg_metrics_path = str(Path(stac_item_path) / f"{stac_item_code}__agg_metrics.csv")
+        agg_metrics_path = f"{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
 
         df = read_agg_metrics(agg_metrics_path)
 
@@ -157,10 +149,7 @@ def main():
         logger.error("No data to write to master_metrics.csv")
         sys.exit(1)
 
-    if batch_root.startswith("s3://"):
-        master_metrics_path = f"{batch_root}/master_metrics.csv"
-    else:
-        master_metrics_path = str(Path(batch_root) / "master_metrics.csv")
+    master_metrics_path = f"{batch_root.rstrip('/')}/master_metrics.csv"
 
     try:
         with fsspec.open(master_metrics_path, "w") as f:
