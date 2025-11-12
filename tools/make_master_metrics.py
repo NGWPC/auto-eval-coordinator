@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def get_stac_item_directories(output_root: str) -> List[tuple[str, str]]:
+def get_stac_item_directories(batch_root: str) -> List[tuple[str, str]]:
     """
     Get all STAC item subdirectories from the output root.
 
@@ -55,12 +55,12 @@ def read_agg_metrics(agg_metrics_path: str) -> Optional[pd.DataFrame]:
             # Specify dtype for columns that should remain as strings
             # to preserve leading zeros in HUC codes
             dtype_spec = {
-                'hucs': str,
-                'nws_lid': str,
-                'stac_item_id': str,
-                'scenario': str,
-                'flow': str,
-                'collection_id': str
+                "hucs": str,
+                "nws_lid": str,
+                "stac_item_id": str,
+                "scenario": str,
+                "flow": str,
+                "collection_id": str,
             }
             df = pd.read_csv(f, dtype=dtype_spec)
             return df
@@ -72,12 +72,12 @@ def read_agg_metrics(agg_metrics_path: str) -> Optional[pd.DataFrame]:
         return None
 
 
-def aggregate_metrics(output_root: str, calb: bool, hand_version: str, resolution: str) -> pd.DataFrame:
+def aggregate_metrics(batch_root: str, calb: bool, hand_version: str, resolution: str) -> pd.DataFrame:
     """
     Aggregate all agg_metrics.csv files from HUC subdirectories.
 
     Args:
-        output_root: Root directory containing HUC subdirectories
+        batch_root: Root directory containing HUC subdirectories
         calb: Calibration flag (True/False)
         hand_version: HAND version value
         resolution: Resolution in meters
@@ -87,10 +87,10 @@ def aggregate_metrics(output_root: str, calb: bool, hand_version: str, resolutio
     """
     all_metrics = []
 
-    stac_item_dirs = get_stac_item_directories(output_root)
+    stac_item_dirs = get_stac_item_directories(batch_root)
 
     if not stac_item_dirs:
-        logger.warning(f"No subdirectories found in {output_root}")
+        logger.warning(f"No subdirectories found in {batch_root}")
         return pd.DataFrame()
 
     logger.info(f"Found {len(stac_item_dirs)} STAC item directories")
@@ -98,8 +98,8 @@ def aggregate_metrics(output_root: str, calb: bool, hand_version: str, resolutio
     for stac_item_code, stac_item_path in stac_item_dirs:
         if stac_item_path.startswith("s3://"):
             agg_metrics_path = f"{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
-        elif output_root.startswith("s3://"):
-            # Handle case where stac_item_path doesn't have s3:// prefix but output_root does
+        elif batch_root.startswith("s3://"):
+            # Handle case where stac_item_path doesn't have s3:// prefix but batch_root does
             agg_metrics_path = f"s3://{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
         else:
             agg_metrics_path = str(Path(stac_item_path) / f"{stac_item_code}__agg_metrics.csv")
@@ -135,7 +135,7 @@ def main():
         description="Aggregate agg_metrics.csv files from multiple STAC items into a master_metrics.csv file"
     )
 
-    parser.add_argument("output_root", help="Root directory containing STAC item subdirectories (can be S3 path)")
+    parser.add_argument("batch_root", help="Root directory containing STAC item subdirectories (can be S3 path)")
 
     parser.add_argument("--calb", action="store_true", help="Set calibration flag to True (default: False)")
 
@@ -145,22 +145,22 @@ def main():
 
     args = parser.parse_args()
 
-    # Clean up output root path
-    output_root = args.output_root.rstrip("/")
+    # Clean up batch root path
+    batch_root = args.batch_root.rstrip("/")
 
-    logger.info(f"Starting aggregation from {output_root}")
-    logger.info(f"Parameters: calb={args.calb}, " f"hand_version={args.hand_version}, resolution={args.resolution}")
+    logger.info(f"Starting aggregation from {batch_root}")
+    logger.info(f"Parameters: calb={args.calb}, hand_version={args.hand_version}, resolution={args.resolution}")
 
-    master_df = aggregate_metrics(output_root, args.calb, args.hand_version, args.resolution)
+    master_df = aggregate_metrics(batch_root, args.calb, args.hand_version, args.resolution)
 
     if master_df.empty:
         logger.error("No data to write to master_metrics.csv")
         sys.exit(1)
 
-    if output_root.startswith("s3://"):
-        master_metrics_path = f"{output_root}/master_metrics.csv"
+    if batch_root.startswith("s3://"):
+        master_metrics_path = f"{batch_root}/master_metrics.csv"
     else:
-        master_metrics_path = str(Path(output_root) / "master_metrics.csv")
+        master_metrics_path = str(Path(batch_root) / "master_metrics.csv")
 
     try:
         with fsspec.open(master_metrics_path, "w") as f:
