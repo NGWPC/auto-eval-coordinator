@@ -94,6 +94,7 @@ def aggregate_metrics(batch_root: str, calb: bool, hand_version: str, resolution
     logger.info(f"Found {len(stac_item_dirs)} STAC item directories")
 
     for stac_item_code, stac_item_path in stac_item_dirs:
+        # Using unstrip_protocol in make_master_metrics.py allows us to simplify the agg_metrics_path construction here
         agg_metrics_path = f"{stac_item_path.rstrip('/')}/{stac_item_code}__agg_metrics.csv"
 
         df = read_agg_metrics(agg_metrics_path)
@@ -149,6 +150,7 @@ def main():
         logger.error("No data to write to master_metrics.csv")
         sys.exit(1)
 
+    # Can construct the master_metrics path using forward slashes always since feeding path right into fsspec
     master_metrics_path = f"{batch_root.rstrip('/')}/master_metrics.csv"
 
     try:
