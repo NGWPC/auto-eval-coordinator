@@ -20,27 +20,23 @@ def get_stac_item_directories(output_root: str) -> List[tuple[str, str]]:
     """
     stac_item_dirs = []
 
-    if output_root.startswith("s3://"):
-        fs = fsspec.filesystem("s3", anon=False)
-        try:
-            items = fs.ls(output_root, detail=True)
-            for item in items:
-                if item["type"] == "directory":
-                    stac_item_code = item["name"].split("/")[-1]
-                    full_path = item["name"]
-                    if not full_path.endswith("/"):
-                        full_path += "/"
-                    stac_item_dirs.append((stac_item_code, full_path))
-        except Exception as e:
-            logger.error(f"Error listing S3 directories: {e}")
-    else:
-        # Local filesystem
-        output_path = Path(output_root)
-        if output_path.exists() and output_path.is_dir():
-            for item in output_path.iterdir():
-                if item.is_dir():
-                    stac_item_dirs.append((item.name, str(item)))
-
+    # Unified approach for both S3 and local filesystems
+    fs, _ = fsspec.core.url_to_fs(output_root)
+    try:
+        items = fs.ls(output_root, detail=True)
+        for item in items:
+            if item["type"] == "directory":
+                stac_item_code = item["name"].split("/")[-1]
+                full_path = item["name"]
+                # Ensure the path has the proper scheme prefix if needed
+                if not full_path.startswith(("s3://", "/")) and output_root.startswith("s3://"):
+                    full_path = f"s3://{full_path}"
+                if not full_path.endswith("/"):
+                    full_path += "/"
+                stac_item_dirs.append((stac_item_code, full_path))
+    except Exception as e:
+        logger.error(f"Error listing directories in {output_root}: {e}")
+    
     return stac_item_dirs
 
 
