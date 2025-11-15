@@ -48,7 +48,25 @@ curl -X POST \
 
 This version can also be adapted to dispatch jobs to non-local Nomad servers.
 
-### Arguments
+### Testing
+
+This repository includes containerized unit tests for the pipeline. Currently there are tests for the metrics deduplication functionality and error handling in `metrics_aggregator.py` to ensure pipeline idempotency.
+
+**Running the tests:**
+
+To run all tests in a containerized environment:
+
+```bash
+docker compose -f docker-compose-test.yml up --abort-on-container-exit
+```
+
+This will:
+- Build a container using the existing `dev` stage from the Dockerfile
+- Mount the source code, tests, and unit test data
+- Run pytest with coverage reporting
+- Exit automatically when tests complete
+
+### Pipeline Arguments
 - **HAND Version** 
   - The HAND version argument allows the user to specify a specific version of HAND to generate extents for. This argument is required.
 - **Benchmark Source** 
@@ -58,11 +76,11 @@ This version can also be adapted to dispatch jobs to non-local Nomad servers.
 - **Date Range** 
   - Certain Benchmark sources contain flood scenarios that have a time component to them. For example high water mark data is associated with the flood  event associated with a given survey. This argument allows for filtering a Benchmark source to only return benchmark data within a certain date range.
  
-### Inputs
+### Pipeline Inputs
 - **AOI**
   - This input is a geopackage that must contain either a polygon or multipolygon geometry. For every polygon the coordinator will generate a HAND extent and find benchmark data that lies within the polygon for the source selected by the user. The coordinator will then run all the rest of the jobs described in this repository to generate an evaluation for that polygon. 
 
-### Outputs
+### Pipeline Outputs
 - **output_path**
   This is the directory where the outputs of a pipeline will be written. The outputs written to this directory follow this format (here <test-case-id> is synonymous with <aoi-id>:
 

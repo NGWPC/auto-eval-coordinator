@@ -1,0 +1,14 @@
+services:
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./testdata:/app/testdata
+    working_dir: /app
+    command: pytest tests/ -v --cov=src/metrics_aggregator --cov-report=term-missing
+    environment:
+      - PYTHONPATH=/app/src
