@@ -15,34 +15,32 @@ While the current evaluation pipeline is primarily designed to generate HAND FIM
 6. Load the test stac data by running `./testdata/benchmark/load-test-stac-data.sh`
 7. Create required container images from autoeval-jobs repo. Once cloned the autoeval-jobs repo and inside it, execute `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
 8. Build the container image inside this repo with `docker build -t autoeval-coordinator:local .`
-9. Dispatch a pipeline job through Nomad UI or API (see example below)
+9. Obtain AWS credentials for the NGWPC fimc-data bucket that give read privileges to bucket objects. This is necessary to allow loading masking dictionaries for the agreement job.
+10. Make sure your host machine's shell has the correct NOMAD_ADDR variable set. For working locally `NOMAD_ADDR="http://localhost:4646"`. This is mostly important for running commands using the Nomad CLI program.
+11. Dispatch a pipeline job through Nomad UI or API (see example below)
 
 **Tips for working with .env files:**
 - The example.env is a good place to look to make a .env file that is configured for local deployment. This .env file can be stored as .env.local when not in use and copied to .env when local deployment is desired. Depending on which deployment configuration is desired different .env files can be saved locally within the repo without being tracked by git. For example, you could also have a .env.test environment file for deploying to the AWS Test account. 
 
 **Example command for dispatching job in the local environment:**
 
-Once you have gone through the steps above to spin up a local environment you can run a pipeline job with the test data using the following command:
+Once you have gone through the steps above to spin up a local environment you can run a pipeline job with the test data using the following curl command:
 
 ```
-docker exec nomad-server nomad job dispatch -meta="aoi=/testdata/query-polygon.gpkg" -meta="outputs_path=/outputs/test-run" -meta="hand_index_path=/testdata/hand/parquet-index/" -meta="benchmark_sources=usgs-fim-collection" -meta="tags=batch_name=HAND-V2 aoi_name=01080203-shvm3-usgs another_tag=dff" pipeline
-```
-
-If you prefer to use curl from your host machine then the request to post the job using the Nomad API is:
-
-```
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Meta": {
-      "aoi": "/testdata/query-polygon.gpkg",
-      "outputs_path": "/outputs/test-run",
-      "hand_index_path": "/testdata/hand/parquet-index/",
-      "benchmark_sources": "usgs-fim-collection",
-      "tags": "batch_name=HAND-V2 aoi_name=01080203-shvm3-usgs another_tag=dff"
+curl --request POST \
+  --header 'Content-Type: application/json' \
+  --data "{
+    \"Meta\": {
+      \"outputs_path\": \"/outputs/test-run\",
+      \"hand_index_path\": \"/testdata/hand/parquet-index\",
+      \"aws_access_key\": \"$AWS_ACCESS_KEY_ID\",
+      \"aws_secret_key\": \"$AWS_SECRET_ACCESS_KEY\",
+      \"aws_session_token\": \"$AWS_SESSION_TOKEN\",
+      \"aoi_stac_item_id\": \"01080203-shvm3-usgs\",
+      \"tags\": \"batch_name=HAND-V2 aoi_name=01080203-shvm3-usgs another_tag=dff\"
     },
-    "IdPrefixTemplate": "[batch_name=HAND-V2,aoi_name=01080203-shvm3-usgs,another_tag=dff]"
-  }' \
+    \"IdPrefixTemplate\": \"[batch_name=HAND-V2,aoi_name=01080203-shvm3-usgs,another_tag=dff]\"
+  }" \
   http://localhost:4646/v1/job/pipeline/dispatch
 ```
 
