@@ -111,14 +111,6 @@ job "pipeline" {
         # Pipeline ID (using Nomad job ID)
         NOMAD_PIPELINE_JOB_ID = "${NOMAD_JOB_ID}"
 
-        # Pass through meta variables as environment variables
-        NOMAD_META_aoi_geom_path    = "${NOMAD_META_aoi_geom_path}"
-        NOMAD_META_aoi_stac_item_id = "${NOMAD_META_aoi_stac_item_id}"
-        NOMAD_META_outputs_path     = "${NOMAD_META_outputs_path}"
-        NOMAD_META_hand_index_path  = "${NOMAD_META_hand_index_path}"
-        NOMAD_META_benchmark_sources = "${NOMAD_META_benchmark_sources}"
-        NOMAD_META_tags             = "${NOMAD_META_tags}"
-
         # AWS Configuration
         # Test nomad clients can use IAM
         AWS_DEFAULT_REGION    = "us-east-1"
