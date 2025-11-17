@@ -42,34 +42,6 @@ job "pipeline" {
     task "coordinator" {
       driver = "docker"
 
-      # Template for conditional AOI argument handling
-      template {
-        data = <<EOF
-#!/bin/bash
-set -e
-
-# Conditional AOI argument handling
-{{ if env "NOMAD_META_aoi_stac_item_id" }}
-AOI_ARG="--aoi_stac_item_id {{ env "NOMAD_META_aoi_stac_item_id" }}"
-{{ else if env "NOMAD_META_aoi_geom_path" }}
-AOI_ARG="--aoi_geom_path {{ env "NOMAD_META_aoi_geom_path" }}"
-{{ else }}
-echo "ERROR: Must provide either aoi_stac_item_id or aoi_geom_path in job meta"
-exit 1
-{{ end }}
-
-# Build command with conditional AOI argument
-python /app/src/main.py $AOI_ARG \
-  --outputs_path {{ env "NOMAD_META_outputs_path" }} \
-  --hand_index_path {{ env "NOMAD_META_hand_index_path" }} \
-{{ if env "NOMAD_META_benchmark_sources" }}  --benchmark_sources {{ env "NOMAD_META_benchmark_sources" }} \{{ end }}
-{{ if env "NOMAD_META_tags" }}  --tags {{ env "NOMAD_META_tags" }}{{ end }}
-EOF
-
-        destination = "local/run_pipeline.sh"
-        perms = "755"
-      }
-
       config {
         image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-coordinator-v0.1"
         force_pull = false
@@ -82,8 +54,47 @@ EOF
           password = "${NOMAD_META_registry_token}"
         }
 
-        command = "/bin/bash"
-        args = ["${NOMAD_TASK_DIR}/run_pipeline.sh"]
+        # Explicitly override the Docker image's entrypoint.
+        # This forces Nomad to execute your script with /bin/sh
+        # instead of passing it as an argument to the image's default command.
+        entrypoint = ["/bin/sh", "-c"]
+
+        args = [<<-EOF
+          #!/bin/sh
+          set -e
+
+          echo "==== LAUNCH SCRIPT IS EXECUTING ===="
+
+          # Build the command with required args.
+          # Use $$ to escape the $ for HCL parsing, allowing the shell
+          # inside the container to expand the variables at runtime.
+          CMD="python /app/src/main.py \
+            --outputs_path '$${NOMAD_META_outputs_path}' \
+            --hand_index_path '$${NOMAD_META_hand_index_path}'"
+
+          # Conditionally append optional arguments if their meta variables are set.
+          if [ -n "$${NOMAD_META_aoi_stac_item_id}" ]; then
+            CMD="$CMD --aoi_stac_item_id '$${NOMAD_META_aoi_stac_item_id}'"
+          fi
+
+          if [ -n "$${NOMAD_META_aoi_geom_path}" ]; then
+            CMD="$CMD --aoi_geom_path '$${NOMAD_META_aoi_geom_path}'"
+          fi
+
+          if [ -n "$${NOMAD_META_benchmark_sources}" ]; then
+            CMD="$CMD --benchmark_sources '$${NOMAD_META_benchmark_sources}'"
+          fi
+
+          if [ -n "$${NOMAD_META_tags}" ]; then
+            CMD="$CMD --tags $${NOMAD_META_tags}"
+          fi
+
+          echo "Executing Command: $CMD"
+
+          # Quote the variable in eval to handle spaces safely.
+          eval "$CMD"
+        EOF
+        ]
 
         logging {
           type = "awslogs"
@@ -96,13 +107,21 @@ EOF
         }
       }
 
-      env {
+     env {
         # Pipeline ID (using Nomad job ID)
         NOMAD_PIPELINE_JOB_ID = "${NOMAD_JOB_ID}"
-        
+
+        # Pass through meta variables as environment variables
+        NOMAD_META_aoi_geom_path    = "${NOMAD_META_aoi_geom_path}"
+        NOMAD_META_aoi_stac_item_id = "${NOMAD_META_aoi_stac_item_id}"
+        NOMAD_META_outputs_path     = "${NOMAD_META_outputs_path}"
+        NOMAD_META_hand_index_path  = "${NOMAD_META_hand_index_path}"
+        NOMAD_META_benchmark_sources = "${NOMAD_META_benchmark_sources}"
+        NOMAD_META_tags             = "${NOMAD_META_tags}"
+
         # AWS Configuration
         # Test nomad clients can use IAM
-        AWS_DEFAULT_REGION    = "us-east-1"      
+        AWS_DEFAULT_REGION    = "us-east-1"
         # AWS_ACCESS_KEY_ID     = "${NOMAD_META_aws_access_key}"
         # AWS_SECRET_ACCESS_KEY = "${NOMAD_META_aws_secret_key}"
         # AWS_SESSION_TOKEN     = "${NOMAD_META_aws_session_token}"
