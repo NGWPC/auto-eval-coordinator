@@ -38,10 +38,10 @@ class DataService:
         config: AppConfig,
         hand_index_path: str,
         benchmark_collections: Optional[List[str]] = None,
-        aoi_is_item: bool = False,
+        aoi_stac_item_id: Optional[str] = None,
     ):
         self.config = config
-        self.aoi_is_item = aoi_is_item
+        self.aoi_stac_item_id = aoi_stac_item_id
 
         # Initialize credential refresh tracking
         self._credential_lock = threading.Lock()
@@ -98,7 +98,6 @@ class DataService:
                 collections=benchmark_collections,
                 overlap_threshold_percent=config.stac.overlap_threshold_percent,
                 datetime_filter=config.stac.datetime_filter,
-                aoi_is_item=aoi_is_item,
             )
 
         # Initialize FlowfileCombiner
@@ -152,6 +151,41 @@ class DataService:
                 )
         except Exception as e:
             logging.error(f"Error refreshing IAM credentials: {e}")
+
+    def get_polygon_gdf(
+        self,
+        aoi_geom_path: Optional[str] = None,
+        aoi_stac_item_id: Optional[str] = None,
+    ) -> gpd.GeoDataFrame:
+        """
+        Get polygon GeoDataFrame from either a file path or STAC item ID.
+
+        Args:
+            aoi_geom_path: Path to GPKG file (optional)
+            aoi_stac_item_id: STAC item ID (optional)
+
+        Returns:
+            GeoDataFrame with polygon geometry in EPSG:4326
+
+        Raises:
+            ValueError: If neither or both arguments are provided
+        """
+        # Validate mutual exclusivity
+        if aoi_geom_path and aoi_stac_item_id:
+            raise ValueError("Cannot specify both aoi_geom_path and aoi_stac_item_id")
+        if not aoi_geom_path and not aoi_stac_item_id:
+            raise ValueError("Must specify either aoi_geom_path or aoi_stac_item_id")
+
+        if aoi_stac_item_id:
+            # Extract geometry from STAC item
+            if not self.stac_querier:
+                raise RuntimeError("STAC querier not initialized")
+
+            logging.info(f"Extracting geometry from STAC item: {aoi_stac_item_id}")
+            return self.stac_querier.extract_geometry_from_item_id(aoi_stac_item_id)
+        else:
+            # Load from file
+            return self.load_polygon_gdf_from_file(aoi_geom_path)
 
     def load_polygon_gdf_from_file(self, file_path: str) -> gpd.GeoDataFrame:
         """
@@ -229,20 +263,14 @@ class DataService:
             # Run STAC query in executor to avoid blocking
             loop = asyncio.get_running_loop()
 
-            if self.aoi_is_item:
-                # Direct item query mode - extract aoi_name from tags
-                if not tags or "aoi_name" not in tags:
-                    raise ValueError(
-                        "aoi_name tag is required when --aoi_is_item is used"
-                    )
-
-                aoi_name = tags["aoi_name"]
-                logging.info(f"Querying STAC for specific item ID: {aoi_name}")
+            if self.aoi_stac_item_id:
+                # Direct item query mode
+                logging.info(f"Querying STAC for specific item ID: {self.aoi_stac_item_id}")
 
                 stac_results = await loop.run_in_executor(
                     None,
                     self.stac_querier.query_stac_by_item_id,
-                    aoi_name,
+                    self.aoi_stac_item_id,
                 )
             else:
                 # Standard spatial query mode

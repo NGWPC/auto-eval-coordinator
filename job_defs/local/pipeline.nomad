@@ -9,18 +9,19 @@ job "pipeline" {
 
   parameterized {
     meta_required = [
-      "aoi",              
-      "outputs_path",     
-      "hand_index_path",  
+      "outputs_path",
+      "hand_index_path",
     ]
     meta_optional = [
-      "benchmark_sources",# Comma-separated list 
+      "aoi_geom_path",    # GPKG file path (optional - requires either this or aoi_stac_item_id)
+      "aoi_stac_item_id", # STAC item ID for direct querying (optional)
+      "benchmark_sources",# Comma-separated list
       "fim_type",         # extent or depth (default: extent)
       "registry_token",   # Required if using private registry
       "aws_access_key",
-      "aws_secret_key", 
+      "aws_secret_key",
       "aws_session_token",
-      "stac_datetime_filter", 
+      "stac_datetime_filter",
       "nomad_token",     # Required for test environment dispatch never used here
       "tags",            # Space-separated list of key=value pairs
     ]
@@ -40,13 +41,41 @@ job "pipeline" {
     task "coordinator" {
       driver = "docker"
 
+      # Template for conditional AOI argument handling
+      template {
+        data = <<EOF
+#!/bin/bash
+set -e
+
+# Conditional AOI argument handling
+{{ if env "NOMAD_META_aoi_stac_item_id" }}
+AOI_ARG="--aoi_stac_item_id {{ env "NOMAD_META_aoi_stac_item_id" }}"
+{{ else if env "NOMAD_META_aoi_geom_path" }}
+AOI_ARG="--aoi_geom_path {{ env "NOMAD_META_aoi_geom_path" }}"
+{{ else }}
+echo "ERROR: Must provide either aoi_stac_item_id or aoi_geom_path in job meta"
+exit 1
+{{ end }}
+
+# Build command with conditional AOI argument
+python /app/src/main.py $AOI_ARG \
+  --outputs_path {{ env "NOMAD_META_outputs_path" }} \
+  --hand_index_path {{ env "NOMAD_META_hand_index_path" }} \
+{{ if env "NOMAD_META_benchmark_sources" }}  --benchmark_sources {{ env "NOMAD_META_benchmark_sources" }} \{{ end }}
+{{ if env "NOMAD_META_tags" }}  --tags {{ env "NOMAD_META_tags" }}{{ end }}
+EOF
+
+        destination = "local/run_pipeline.sh"
+        perms = "755"
+      }
+
       config {
         # Use local development image - must use specific tag (not 'latest')
         # to prevent Nomad from trying to pull from a registry
-        image = "autoeval-coordinator:local" 
+        image = "autoeval-coordinator:local"
         force_pull = false
         network_mode = "host"
-        
+
         # Mount local test data and output directory
         volumes = [
           "${var.repo_root}/testdata:/testdata:ro",
@@ -55,15 +84,8 @@ job "pipeline" {
           "${var.repo_root}/local-batches:/local-batches:rw"
         ]
 
-        args = [
-          "--aoi", "${NOMAD_META_aoi}",
-          "--outputs_path", "${NOMAD_META_outputs_path}",
-          "--hand_index_path", "${NOMAD_META_hand_index_path}",
-          "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
-          "--tags", "${NOMAD_META_tags}",
-          # remove this if test cases don't correspond to unique Benchmark STAC items
-          "--aoi_is_item",
-          ]
+        command = "/bin/bash"
+        args = ["${NOMAD_TASK_DIR}/run_pipeline.sh"]
       }
 
       env {
@@ -150,7 +172,8 @@ job "pipeline" {
               echo "Job ID: ${NOMAD_JOB_ID}"
               echo "BATCH_NAME: $BATCH_NAME"
               echo "Allocation ID: ${NOMAD_ALLOC_ID}"
-              echo "AOI: ${NOMAD_META_aoi}"
+              echo "AOI Geom Path: ${NOMAD_META_aoi_geom_path}"
+              echo "AOI STAC Item ID: ${NOMAD_META_aoi_stac_item_id}"
               echo "Outputs Path: ${NOMAD_META_outputs_path}"
               echo "HAND Index Path: ${NOMAD_META_hand_index_path}"
               echo "Benchmark Sources: ${NOMAD_META_benchmark_sources}"

@@ -9,19 +9,20 @@ job "pipeline" {
 
   parameterized {
     meta_required = [
-      "aoi",              
-      "outputs_path",     
+      "outputs_path",
       "hand_index_path",
       "nomad_token",     # Required for test environment
     ]
     meta_optional = [
-      "benchmark_sources",# Comma-separated list 
+      "aoi_geom_path",    # GPKG file path (optional - requires either this or aoi_stac_item_id)
+      "aoi_stac_item_id", # STAC item ID for direct querying (optional)
+      "benchmark_sources",# Comma-separated list
       "fim_type",         # extent or depth (default: extent)
       "registry_token",   # Required if using private registry
       "aws_access_key",
-      "aws_secret_key", 
+      "aws_secret_key",
       "aws_session_token",
-      "stac_datetime_filter", 
+      "stac_datetime_filter",
       "tags",            # Space-separated list of key=value pairs
     ]
   }
@@ -41,27 +42,48 @@ job "pipeline" {
     task "coordinator" {
       driver = "docker"
 
+      # Template for conditional AOI argument handling
+      template {
+        data = <<EOF
+#!/bin/bash
+set -e
+
+# Conditional AOI argument handling
+{{ if env "NOMAD_META_aoi_stac_item_id" }}
+AOI_ARG="--aoi_stac_item_id {{ env "NOMAD_META_aoi_stac_item_id" }}"
+{{ else if env "NOMAD_META_aoi_geom_path" }}
+AOI_ARG="--aoi_geom_path {{ env "NOMAD_META_aoi_geom_path" }}"
+{{ else }}
+echo "ERROR: Must provide either aoi_stac_item_id or aoi_geom_path in job meta"
+exit 1
+{{ end }}
+
+# Build command with conditional AOI argument
+python /app/src/main.py $AOI_ARG \
+  --outputs_path {{ env "NOMAD_META_outputs_path" }} \
+  --hand_index_path {{ env "NOMAD_META_hand_index_path" }} \
+{{ if env "NOMAD_META_benchmark_sources" }}  --benchmark_sources {{ env "NOMAD_META_benchmark_sources" }} \{{ end }}
+{{ if env "NOMAD_META_tags" }}  --tags {{ env "NOMAD_META_tags" }}{{ end }}
+EOF
+
+        destination = "local/run_pipeline.sh"
+        perms = "755"
+      }
+
       config {
         image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-coordinator-v0.1"
         force_pull = false
         # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
         network_mode = "host"
-        
+
         # Docker registry authentication
         auth {
           username = "ReadOnly_NGWPC_Group_Deploy_Token"
           password = "${NOMAD_META_registry_token}"
         }
 
-        args = [
-          "--aoi", "${NOMAD_META_aoi}",
-          "--outputs_path", "${NOMAD_META_outputs_path}",
-          "--hand_index_path", "${NOMAD_META_hand_index_path}",
-          "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
-          "--tags", "${NOMAD_META_tags}",
-          # remove this if test cases don't correspond to unique Benchmark STAC items
-          "--aoi_is_item",
-        ]
+        command = "/bin/bash"
+        args = ["${NOMAD_TASK_DIR}/run_pipeline.sh"]
 
         logging {
           type = "awslogs"

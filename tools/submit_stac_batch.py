@@ -8,13 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
-import fsspec
 import nomad
-
-from extract_stac_geometries import (
-    extract_geometry_by_stac_id,
-    should_use_convex_hull,
-)
 
 
 def retry_with_backoff(max_retries: int = 2, backoff_base: float = 2.0):
@@ -37,9 +31,7 @@ def retry_with_backoff(max_retries: int = 2, backoff_base: float = 2.0):
                     result = func(*args, **kwargs)
 
                     if attempt > 0:
-                        logging.info(
-                            f"Function {func_name} succeeded on attempt {attempt + 1}"
-                        )
+                        logging.info(f"Function {func_name} succeeded on attempt {attempt + 1}")
 
                     return result
 
@@ -52,9 +44,7 @@ def retry_with_backoff(max_retries: int = 2, backoff_base: float = 2.0):
                         )
                         time.sleep(wait_time)
                     else:
-                        logging.error(
-                            f"Function {func_name} failed after {max_retries + 1} attempts: {e}"
-                        )
+                        logging.error(f"Function {func_name} failed after {max_retries + 1} attempts: {e}")
 
             raise last_exception
 
@@ -67,12 +57,10 @@ def retry_with_backoff(max_retries: int = 2, backoff_base: float = 2.0):
 def submit_pipeline_job(
     nomad_client: nomad.Nomad,
     item_id: str,
-    gpkg_path: str,
     batch_name: str,
     output_root: str,
     hand_index_path: str,
     benchmark_sources: str,
-    collection_id: str,
     nomad_token: Optional[str] = None,
     use_local_creds: bool = False,
 ) -> str:
@@ -86,7 +74,7 @@ def submit_pipeline_job(
     output_root_clean = output_root.rstrip("/")
 
     meta = {
-        "aoi": str(gpkg_path),
+        "aoi_stac_item_id": item_id,
         "outputs_path": f"{output_root_clean}/{item_id}/",
         "hand_index_path": hand_index_path,
         "benchmark_sources": benchmark_sources,
@@ -105,8 +93,9 @@ def submit_pipeline_job(
             }
         )
 
-    # Create the id_prefix_template in the format [batch_name=value,aoi_name=value,collection=value]
-    id_prefix_template = f"[batch_name={batch_name},aoi_name={item_id},collection={collection_id}]"
+    # Create the id_prefix_template in the format [batch_name=value,aoi_name=value]
+    # Note: We no longer have collection_id since we're not extracting geometries
+    id_prefix_template = f"[batch_name={batch_name},aoi_name={item_id}]"
 
     result = nomad_client.job.dispatch_job(
         id_="pipeline",
@@ -128,88 +117,25 @@ def get_running_pipeline_jobs(nomad_client: nomad.Nomad) -> int:
     """
     # Get all jobs to include dispatched jobs that haven't been allocated yet
     jobs = nomad_client.jobs.get_jobs()
-    pipeline_jobs = [
-        job for job in jobs if job.get("ID", "").startswith("pipeline")
-    ]
+    pipeline_jobs = [job for job in jobs if job.get("ID", "").startswith("pipeline")]
 
     running_count = 0
     for job in pipeline_jobs:
         job_status = job.get("Status", "")
         # Debug logging to see actual job statuses
-        logging.debug(
-            f"Pipeline job {job.get('ID', 'unknown')}: Status={job_status}"
-        )
+        logging.debug(f"Pipeline job {job.get('ID', 'unknown')}: Status={job_status}")
 
         # Count jobs that are not finished (dead = finished)
         # "running" includes both allocated jobs and dispatched jobs waiting for allocation
         if job_status != "dead":
             running_count += 1
 
-    logging.debug(
-        f"Found {running_count} active pipeline jobs out of {len(pipeline_jobs)} total pipeline jobs"
-    )
+    logging.debug(f"Found {running_count} active pipeline jobs out of {len(pipeline_jobs)} total pipeline jobs")
     return running_count
 
 
-def extract_items(
-    item_ids: List[str],
-    temp_dir: Path,
-    stac_api_url: str,
-    collection: Optional[str] = None,
-) -> Dict[str, tuple[Path, str]]:
-    """
-    Extract STAC item geometries and save as individual gpkg files.
-
-    Returns:
-        Dict mapping item IDs to tuples of (gpkg file path, collection ID)
-    """
-    item_files = {}
-
-    for item_id in item_ids:
-        try:
-            logging.info(f"Extracting geometry for STAC item {item_id}")
-
-            # First, fetch without convex hull to get collection info
-            gdf = extract_geometry_by_stac_id(
-                item_id,
-                stac_api_url=stac_api_url,
-                collection=collection,
-                use_convex_hull=False,
-            )
-
-            # Check if we should use convex hull based on collection
-            collection_id = gdf.iloc[0]["collection"]
-            if should_use_convex_hull(collection_id):
-                logging.info(
-                    f"Applying convex hull for collection {collection_id}"
-                )
-                gdf = extract_geometry_by_stac_id(
-                    item_id,
-                    stac_api_url=stac_api_url,
-                    collection=collection,
-                    use_convex_hull=True,
-                )
-
-            # Save to temp file
-            output_file = temp_dir / f"stac_{item_id}.gpkg"
-            gdf.to_file(output_file, driver="GPKG")
-
-            item_files[item_id] = (output_file, collection_id)
-            logging.info(
-                f"Saved STAC item {item_id} (collection: {collection_id}) to {output_file}"
-            )
-
-        except Exception as e:
-            logging.error(f"Failed to extract STAC item {item_id}: {e}")
-            # Continue with other items
-
-    return item_files
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Submit batch of pipeline jobs for multiple STAC items"
-    )
+    parser = argparse.ArgumentParser(description="Submit batch of pipeline jobs for multiple STAC items")
 
     # Required arguments
     parser.add_argument(
@@ -239,11 +165,6 @@ def main():
     )
 
     # Optional arguments
-    parser.add_argument(
-        "--temp_dir",
-        default="/tmp/stac_batch",
-        help="Temporary directory for extracted STAC item .gpkg files",
-    )
     parser.add_argument(
         "--wait_seconds",
         type=int,
@@ -286,23 +207,6 @@ def main():
         action="store_true",
         help="Use AWS credentials from shell environment instead of IAM roles",
     )
-    
-    # Local output arguments
-    parser.add_argument(
-        "--use-local-output",
-        action="store_true",
-        help="Copy AOI files to a local directory instead of uploading to S3",
-    )
-
-    # STAC-specific arguments
-    parser.add_argument(
-        "--stac_api_url",
-        default="http://benchmark-stac.test.nextgenwaterprediction.com:8000",
-        help="STAC API URL",
-    )
-    parser.add_argument(
-        "--collection", help="Optional: specific collection to search within"
-    )
 
     args = parser.parse_args()
 
@@ -316,75 +220,15 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # Create temp directory
-    temp_dir = Path(args.temp_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
     # Read STAC item IDs
     with open(args.item_list, "r") as f:
         item_ids = [line.strip() for line in f if line.strip()]
 
+    if not item_ids:
+        logging.error("No STAC item IDs found in item list")
+        return 1
+
     logging.info(f"Loaded {len(item_ids)} STAC item IDs from {args.item_list}")
-
-    # Extract STAC item geometries
-    logging.info("Extracting STAC item geometries...")
-    item_files = extract_items(
-        item_ids, temp_dir, args.stac_api_url, args.collection
-    )
-
-    if not item_files:
-        logging.error("No STAC item geometries extracted successfully")
-        return 1
-
-    logging.info(
-        f"Successfully extracted {len(item_files)} STAC item geometries"
-    )
-
-    # Simplified using url_to_fs - no need for separate S3/local branches
-    fs, _ = fsspec.core.url_to_fs(args.output_root)
-    base_path = f"{args.output_root.rstrip('/')}/AOIs"
-    logging.info(f"Using output path: {base_path}")
-    
-    # Create output directory if using local filesystem
-    if args.use_local_output:
-        fs.makedirs(base_path, exist_ok=True)
-
-    # Upload/copy AOI files using fsspec
-    aoi_paths = {}
-    action_verb = "Copying" if args.use_local_output else "Uploading"
-    
-    logging.info(f"{action_verb} AOI files to {base_path}")
-    for item_id, (local_path, collection_id) in item_files.items():
-        dest_path = f"{base_path}/stac_{item_id}.gpkg"
-        try:
-            with open(local_path, "rb") as local_file:
-                with fs.open(dest_path, "wb") as dest_file:
-                    dest_file.write(local_file.read())
-            
-            # For local output, convert host path to container path
-            if args.use_local_output:
-                # Get the absolute path on the host
-                abs_dest_path = os.path.abspath(dest_path)
-                # Find where local-batches is in the path and replace everything before it with /
-                if '/local-batches/' in abs_dest_path:
-                    # Split at local-batches and rejoin with container mount point
-                    parts = abs_dest_path.split('/local-batches/')
-                    container_path = '/local-batches/' + parts[-1]
-                else:
-                    # Fallback - just use the dest_path as is
-                    container_path = dest_path
-                aoi_paths[item_id] = (container_path, collection_id)
-                logging.info(f"{action_verb} {local_path} to {dest_path} (container: {container_path})")
-            else:
-                aoi_paths[item_id] = (dest_path, collection_id)
-                logging.info(f"{action_verb} {local_path} to {dest_path}")
-        except Exception as e:
-            logging.error(f"Failed to {action_verb.lower()} AOI for STAC item {item_id}: {e}")
-            continue
-
-    if not aoi_paths:
-        logging.error(f"No AOI files {action_verb.lower()} successfully")
-        return 1
 
     # Initialize Nomad client
     parsed = urlparse(args.nomad_addr)
@@ -403,12 +247,10 @@ def main():
     # Track submission state for hysteresis
     submission_paused = False
 
-    logging.info(f"Starting job submission for {len(aoi_paths)} STAC items")
-    logging.info(
-        f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}"
-    )
+    logging.info(f"Starting job submission for {len(item_ids)} STAC items")
+    logging.info(f"Thresholds - Stop: {args.stop_threshold}, Resume: {args.resume_threshold}")
 
-    for item_id, (aoi_path, collection_id) in aoi_paths.items():
+    for item_id in item_ids:
         # Implement hysteresis for job submission control
         while True:
             current_jobs = get_running_pipeline_jobs(nomad_client)
@@ -437,43 +279,33 @@ def main():
                     break
                 else:
                     # Still need to wait
-                    wait_time = max(
-                        args.wait_seconds, 10
-                    )  # Minimum 10 seconds to avoid hammering the API
+                    wait_time = max(args.wait_seconds, 10)  # Minimum 10 seconds to avoid hammering the API
                     logging.debug(
                         f"Waiting for jobs to drop to resume threshold. Current: {actual_running}, "
                         f"Resume at: {args.resume_threshold}. Waiting {wait_time} seconds..."
                     )
                     time.sleep(wait_time)
 
-        logging.info(
-            f"Submitting job for STAC item {item_id} (collection: {collection_id})"
-        )
+        logging.info(f"Submitting job for STAC item {item_id}")
 
         try:
             job_id = submit_pipeline_job(
                 nomad_client=nomad_client,
                 item_id=item_id,
-                gpkg_path=aoi_path,
                 batch_name=args.batch_name,
                 output_root=args.output_root,
                 hand_index_path=args.hand_index_path,
                 benchmark_sources=args.benchmark_sources,
-                collection_id=collection_id,
                 nomad_token=args.nomad_token,
                 use_local_creds=args.use_local_creds,
             )
 
             submitted_jobs.append((item_id, job_id))
-            logging.info(
-                f"Successfully submitted job {job_id} for STAC item {item_id}"
-            )
+            logging.info(f"Successfully submitted job {job_id} for STAC item {item_id}")
 
             # Wait between submissions if specified
             if args.wait_seconds > 0:
-                logging.info(
-                    f"Waiting {args.wait_seconds} seconds before next submission..."
-                )
+                logging.info(f"Waiting {args.wait_seconds} seconds before next submission...")
                 time.sleep(args.wait_seconds)
 
         except Exception as e:
@@ -484,7 +316,7 @@ def main():
     logging.info("\n" + "=" * 60)
     logging.info("BATCH SUBMISSION COMPLETE")
     logging.info("=" * 60)
-    logging.info(f"Total STAC items processed: {len(item_files)}")
+    logging.info(f"Total STAC items processed: {len(item_ids)}")
     logging.info(f"Successfully submitted: {len(submitted_jobs)}")
     logging.info(f"Failed submissions: {len(failed_submissions)}")
 
@@ -503,13 +335,9 @@ def main():
         logging.info("\nMonitoring job completion...")
         while True:
             current_jobs = get_running_pipeline_jobs(nomad_client)
-            logging.info(
-                f"Currently running pipeline jobs: {current_jobs - 1}"
-            )  # don't count the parent job
+            logging.info(f"Currently running pipeline jobs: {current_jobs - 1}")  # don't count the parent job
 
-            if (
-                current_jobs <= 1
-            ):  # Only the parameterized job template should remain
+            if current_jobs <= 1:  # Only the parameterized job template should remain
                 logging.info("All submitted jobs have completed!")
                 break
 

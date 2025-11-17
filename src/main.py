@@ -42,7 +42,7 @@ class PolygonPipeline:
         polygon_gdf: gpd.GeoDataFrame,
         tags: Dict[str, str],
         outputs_path: str,
-        aoi_path: str,
+        aoi_path: Optional[str] = None,
         log_db: Optional[PipelineLogDB] = None,
     ):
         self.config = config
@@ -72,9 +72,7 @@ class PolygonPipeline:
         """Query for catchments and flow scenarios. Returns early exit info if no data found."""
         # Query STAC for flow scenarios (always required)
         logger.debug("Querying STAC for flow scenarios")
-        stac_data = await self.data_svc.query_stac_for_flow_scenarios(
-            self.polygon_gdf, self.tags
-        )
+        stac_data = await self.data_svc.query_stac_for_flow_scenarios(self.polygon_gdf, self.tags)
         self.flow_scenarios = stac_data.get("combined_flowfiles", {})
 
         # Extract benchmark rasters from STAC scenarios
@@ -121,13 +119,8 @@ class PolygonPipeline:
                 "successful_scenarios": 0,
             }
 
-        total_scenarios = sum(
-            len(scenarios) for scenarios in self.flow_scenarios.values()
-        )
-        logger.info(
-            f"Initialization complete: {len(self.catchments)} catchments, "
-            f"{total_scenarios} flow scenarios"
-        )
+        total_scenarios = sum(len(scenarios) for scenarios in self.flow_scenarios.values())
+        logger.info(f"Initialization complete: {len(self.catchments)} catchments, {total_scenarios} flow scenarios")
         return None
 
     async def run(self) -> Dict[str, Any]:
@@ -141,9 +134,7 @@ class PolygonPipeline:
         results = []
         for collection, flows in self.flow_scenarios.items():
             for scenario, flowfile_path in flows.items():
-                benchmark_rasters = self.benchmark_scenarios.get(
-                    collection, {}
-                ).get(scenario, [])
+                benchmark_rasters = self.benchmark_scenarios.get(collection, {}).get(scenario, [])
                 result = PipelineResult(
                     scenario_id=f"{collection}-{scenario}",
                     collection_name=collection,
@@ -161,9 +152,7 @@ class PolygonPipeline:
                 )
                 results.append(result)
 
-        logger.debug(
-            f"Processing {len(results)} scenarios with stage-based parallelism"
-        )
+        logger.debug(f"Processing {len(results)} scenarios with stage-based parallelism")
 
         try:
             inundation_stage = InundationStage(
@@ -215,15 +204,11 @@ class PolygonPipeline:
                         serializable_results.append(result_dict)
 
                     # Write to temporary file first, then copy to final location
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", suffix=".json", delete=False
-                    ) as temp_file:
+                    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as temp_file:
                         json.dump(serializable_results, temp_file, indent=2)
                         temp_json_path = temp_file.name
 
-                    await self.data_svc.copy_file_to_uri(
-                        temp_json_path, results_json_path
-                    )
+                    await self.data_svc.copy_file_to_uri(temp_json_path, results_json_path)
                     logger.info(f"Results JSON written to {results_json_path}")
 
                     # Clean up temp file
@@ -243,12 +228,8 @@ class PolygonPipeline:
                         flow_scenarios=self.flow_scenarios,
                         aoi_name=self.path_factory.aoi_name,
                     )
-                    metrics_path = aggregator.save_results(
-                        self.path_factory.results_path()
-                    )
-                    logger.info(
-                        f"Metrics aggregation completed: {metrics_path}"
-                    )
+                    metrics_path = aggregator.save_results(self.path_factory.results_path())
+                    logger.info(f"Metrics aggregation completed: {metrics_path}")
                 except Exception as e:
                     logger.error(f"Metrics aggregation failed: {e}")
 
@@ -262,9 +243,7 @@ class PolygonPipeline:
                 "successful_scenarios": len(successful_results),
                 "message": f"Pipeline completed successfully with {len(successful_results)}/{total_attempted} scenarios",
             }
-            logger.info(
-                f"Pipeline SUCCESS: {len(successful_results)}/{total_attempted} scenarios completed"
-            )
+            logger.info(f"Pipeline SUCCESS: {len(successful_results)}/{total_attempted} scenarios completed")
             return summary
         except DataServiceException as e:
             logger.error(f"Pipeline FAILED due to data service error: {str(e)}")
@@ -291,9 +270,7 @@ def parsed_tags(tag_list):
 
     for tag in tag_list:
         if "=" not in tag:
-            raise argparse.ArgumentTypeError(
-                f"Invalid tag format: '{tag}'. Expected key=value."
-            )
+            raise argparse.ArgumentTypeError(f"Invalid tag format: '{tag}'. Expected key=value.")
         key, value = tag.split("=", 1)
 
         for char in forbidden_chars:
@@ -325,26 +302,19 @@ def parsed_tags(tag_list):
     if tags:
         tags_str = ",".join(f"{k}={v}" for k, v in tags.items())
         if len(tags_str) > 150:
-            raise argparse.ArgumentTypeError(
-                f"Tags exceed 150 character limit ({len(tags_str)} chars): {tags_str}"
-            )
+            raise argparse.ArgumentTypeError(f"Tags exceed 150 character limit ({len(tags_str)} chars): {tags_str}")
 
     return tags
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Run one PolygonPipeline in isolation"
-    )
+    parser = argparse.ArgumentParser(description="Run one PolygonPipeline in isolation")
     parser.add_argument(
-        "--aoi",
+        "--aoi_geom_path",
         type=str,
-        required=True,
-        help="File path to a GPKG containing a single polygon. If more than one layer/feature, only the first is used.",
+        help="Path to GPKG file containing a single polygon for area of interest. If more than one layer/feature, only the first is used.",
     )
-    parser.add_argument(
-        "--outputs_path", type=str, required=True, help="Output directory path"
-    )
+    parser.add_argument("--outputs_path", type=str, required=True, help="Output directory path")
     parser.add_argument(
         "--benchmark_sources",
         type=str,
@@ -367,12 +337,19 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--aoi_is_item",
-        action="store_true",
-        help="If set, treat the aoi_name tag as a STAC item ID for direct querying instead of performing spatial queries",
+        "--aoi_stac_item_id",
+        type=str,
+        default=None,
+        help="STAC item ID to query directly. Geometry will be extracted from this STAC item instead of using a GPKG file.",
     )
 
     args = parser.parse_args()
+
+    # Validate exclusivity of AOI arguments
+    if args.aoi_geom_path and args.aoi_stac_item_id:
+        parser.error("Cannot specify both --aoi_geom_path and --aoi_stac_item_id. Use one or the other.")
+    if not args.aoi_geom_path and not args.aoi_stac_item_id:
+        parser.error("Must specify either --aoi_geom_path (GPKG file) or --aoi_stac_item_id (STAC item ID)")
 
     if args.tags and args.tags != [""]:
         # Flatten any space-separated arguments to handle both manual and Nomad invocation styles
@@ -391,17 +368,13 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    temp_log_file = tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix="_pipeline.log"
-    )
+    temp_log_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix="_pipeline.log")
     temp_log_path = temp_log_file.name
     temp_log_file.close()
 
     file_handler = logging.FileHandler(temp_log_path)
     file_handler.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    )
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
 
     root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)
@@ -409,22 +382,18 @@ if __name__ == "__main__":
     cfg = load_config()
 
     async def _main():
-        # Validate AOI file extension
-        if not args.aoi.lower().endswith(".gpkg"):
-            raise ValueError(f"AOI file must be a GPKG file, got: {args.aoi}")
-
         outputs_path = args.outputs_path
 
         if os.path.exists(outputs_path):
             raise ValueError(f"Output directory already exists: {outputs_path}")
 
+        # Validate GPKG file extension if using file mode
+        if args.aoi_geom_path and not args.aoi_geom_path.lower().endswith(".gpkg"):
+            raise ValueError(f"AOI file must be a GPKG file, got: {args.aoi_geom_path}")
+
         timeout = aiohttp.ClientTimeout(total=160, connect=40, sock_read=60)
-        connector = aiohttp.TCPConnector(
-            limit=cfg.defaults.http_connection_limit
-        )
-        async with aiohttp.ClientSession(
-            timeout=timeout, connector=connector
-        ) as session:
+        connector = aiohttp.TCPConnector(limit=cfg.defaults.http_connection_limit)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
             log_db = PipelineLogDB("pipeline_log.db")
             await log_db.initialize()
 
@@ -440,37 +409,34 @@ if __name__ == "__main__":
             # if no benchmark collections provided all collections queried
             benchmark_collections = None
             if args.benchmark_sources:
-                benchmark_collections = [
-                    col.strip() for col in args.benchmark_sources.split(",")
-                ]
-                logging.info(
-                    f"Using benchmark sources: {benchmark_collections}"
-                )
+                benchmark_collections = [col.strip() for col in args.benchmark_sources.split(",")]
+                logging.info(f"Using benchmark sources: {benchmark_collections}")
 
-            data_svc = DataService(
-                cfg, args.hand_index_path, benchmark_collections, args.aoi_is_item
+            data_svc = DataService(cfg, args.hand_index_path, benchmark_collections, args.aoi_stac_item_id)
+
+            # Get polygon GeoDataFrame from either file or STAC item
+            polygon_gdf = data_svc.get_polygon_gdf(
+                aoi_geom_path=args.aoi_geom_path,
+                aoi_stac_item_id=args.aoi_stac_item_id,
             )
 
-            logging.info(f"Loading polygon from: {args.aoi}")
-            polygon_gdf = data_svc.load_polygon_gdf_from_file(args.aoi)
-
-            # Validate GPKG contents
+            # Validate geometry contents
             if len(polygon_gdf) == 0:
-                raise ValueError("GPKG file contains no features")
+                raise ValueError("Polygon GeoDataFrame contains no features")
 
             if len(polygon_gdf) > 1:
-                logging.warning(
-                    f"Found {len(polygon_gdf)} features in {args.aoi}, using only the first one"
-                )
+                aoi_identifier = args.aoi_stac_item_id or args.aoi_geom_path
+                logging.warning(f"Found {len(polygon_gdf)} features in {aoi_identifier}, using only the first one")
                 polygon_gdf = polygon_gdf.iloc[[0]]
 
             geom = polygon_gdf.geometry.iloc[0]
             if geom.geom_type != "Polygon":
-                raise ValueError(
-                    f"Feature must be POLYGON type, got: {geom.geom_type}"
-                )
+                raise ValueError(f"Feature must be POLYGON type, got: {geom.geom_type}")
 
             logging.info(f"Using HAND index path: {args.hand_index_path}")
+
+            # Set aoi_path for file mode, None for STAC item mode
+            aoi_path = args.aoi_geom_path if args.aoi_geom_path else None
 
             pipeline = PolygonPipeline(
                 cfg,
@@ -479,12 +445,12 @@ if __name__ == "__main__":
                 polygon_gdf,
                 args.tags,
                 outputs_path,
-                args.aoi,
+                aoi_path,
                 log_db,
             )
-            logging.info(
-                f"Started pipeline run for {args.aoi} with outputs to {outputs_path}"
-            )
+
+            aoi_identifier = args.aoi_stac_item_id or args.aoi_geom_path
+            logging.info(f"Started pipeline run for {aoi_identifier} with outputs to {outputs_path}")
 
             try:
                 summary = await pipeline.run()
