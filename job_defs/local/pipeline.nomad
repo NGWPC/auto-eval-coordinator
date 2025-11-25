@@ -11,6 +11,7 @@ job "pipeline" {
     meta_required = [
       "outputs_path",
       "hand_index_path",
+      "tags",               # Space-separated list of key=value pairs (must include batch_name and aoi_name)
     ]
     meta_optional = [
       "aoi_geom_path",      # GPKG file path (optional - requires either this or aoi_stac_item_id)
@@ -23,7 +24,6 @@ job "pipeline" {
       "aws_session_token",
       "stac_datetime_filter",
       "nomad_token",        # Required for test environment dispatch never used here
-      "tags",               # Space-separated list of key=value pairs
     ]
   }
 
@@ -46,46 +46,13 @@ task "coordinator" {
           "${var.repo_root}/local-batches:/local-batches:rw"
         ]
 
-        # Explicitly override the Docker image's entrypoint.
-        # This forces Nomad to execute your script with /bin/sh
-        # instead of passing it as an argument to the image's default command.
-        entrypoint = ["/bin/sh", "-c"]
-
-        args = [<<-EOF
-          #!/bin/sh
-          set -e
-
-          echo "==== LAUNCH SCRIPT IS EXECUTING ===="
-
-          # Build the command with required args.
-          # Use $$ to escape the $ for HCL parsing, allowing the shell
-          # inside the container to expand the variables at runtime.
-          CMD="python /app/src/main.py \
-            --outputs_path '$${NOMAD_META_outputs_path}' \
-            --hand_index_path '$${NOMAD_META_hand_index_path}'"
-
-          # Conditionally append optional arguments if their meta variables are set.
-          if [ -n "$${NOMAD_META_aoi_stac_item_id}" ]; then
-            CMD="$CMD --aoi_stac_item_id '$${NOMAD_META_aoi_stac_item_id}'"
-          fi
-
-          if [ -n "$${NOMAD_META_aoi_geom_path}" ]; then
-            CMD="$CMD --aoi_geom_path '$${NOMAD_META_aoi_geom_path}'"
-          fi
-
-          if [ -n "$${NOMAD_META_benchmark_sources}" ]; then
-            CMD="$CMD --benchmark_sources '$${NOMAD_META_benchmark_sources}'"
-          fi
-
-          if [ -n "$${NOMAD_META_tags}" ]; then
-            CMD="$CMD --tags $${NOMAD_META_tags}"
-          fi
-
-          echo "Executing Command: $CMD"
-
-          # Quote the variable in eval to handle spaces safely.
-          eval "$CMD"
-        EOF
+        args = [
+          "--outputs_path", "${NOMAD_META_outputs_path}",
+          "--hand_index_path", "${NOMAD_META_hand_index_path}",
+          "--aoi_stac_item_id", "${NOMAD_META_aoi_stac_item_id}",
+          "--aoi_geom_path", "${NOMAD_META_aoi_geom_path}",
+          "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
+          "--tags", "${NOMAD_META_tags}",
         ]
       }
 

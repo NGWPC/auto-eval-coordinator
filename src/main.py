@@ -345,6 +345,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Normalize empty strings sent by Nomad pipeline job to None for optional arguments
+    args.aoi_geom_path = args.aoi_geom_path or None
+    args.aoi_stac_item_id = args.aoi_stac_item_id or None
+    args.benchmark_sources = args.benchmark_sources or None
+
     # Validate exclusivity of AOI arguments
     if args.aoi_geom_path and args.aoi_stac_item_id:
         parser.error("Cannot specify both --aoi_geom_path and --aoi_stac_item_id. Use one or the other.")
