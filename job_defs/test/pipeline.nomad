@@ -9,20 +9,21 @@ job "pipeline" {
 
   parameterized {
     meta_required = [
-      "aoi",              
-      "outputs_path",     
+      "outputs_path",
       "hand_index_path",
-      "nomad_token",     # Required for test environment
+      "nomad_token",      # Required for test environment
+      "tags",             # Space-separated list of key=value pairs (must include batch_name)
     ]
     meta_optional = [
-      "benchmark_sources",# Comma-separated list 
+      "aoi_geom_path",    # GPKG file path (optional - requires either this or aoi_stac_item_id)
+      "aoi_stac_item_id", # STAC item ID for direct querying (optional)
+      "benchmark_sources",# Comma-separated list
       "fim_type",         # extent or depth (default: extent)
       "registry_token",   # Required if using private registry
       "aws_access_key",
-      "aws_secret_key", 
+      "aws_secret_key",
       "aws_session_token",
-      "stac_datetime_filter", 
-      "tags",            # Space-separated list of key=value pairs
+      "stac_datetime_filter",
     ]
   }
 
@@ -46,7 +47,7 @@ job "pipeline" {
         force_pull = false
         # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
         network_mode = "host"
-        
+
         # Docker registry authentication
         auth {
           username = "ReadOnly_NGWPC_Group_Deploy_Token"
@@ -54,13 +55,12 @@ job "pipeline" {
         }
 
         args = [
-          "--aoi", "${NOMAD_META_aoi}",
           "--outputs_path", "${NOMAD_META_outputs_path}",
           "--hand_index_path", "${NOMAD_META_hand_index_path}",
+          "--aoi_stac_item_id", "${NOMAD_META_aoi_stac_item_id}",
+          "--aoi_geom_path", "${NOMAD_META_aoi_geom_path}",
           "--benchmark_sources", "${NOMAD_META_benchmark_sources}",
           "--tags", "${NOMAD_META_tags}",
-          # remove this if test cases don't correspond to unique Benchmark STAC items
-          "--aoi_is_item",
         ]
 
         logging {
@@ -74,13 +74,13 @@ job "pipeline" {
         }
       }
 
-      env {
+     env {
         # Pipeline ID (using Nomad job ID)
         NOMAD_PIPELINE_JOB_ID = "${NOMAD_JOB_ID}"
-        
+
         # AWS Configuration
         # Test nomad clients can use IAM
-        AWS_DEFAULT_REGION    = "us-east-1"      
+        AWS_DEFAULT_REGION    = "us-east-1"
         # AWS_ACCESS_KEY_ID     = "${NOMAD_META_aws_access_key}"
         # AWS_SECRET_ACCESS_KEY = "${NOMAD_META_aws_secret_key}"
         # AWS_SESSION_TOKEN     = "${NOMAD_META_aws_session_token}"
