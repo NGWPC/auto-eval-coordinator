@@ -12,7 +12,7 @@ job "pipeline" {
       "outputs_path",
       "hand_index_path",
       "nomad_token",      # Required for test environment
-      "tags",             # Space-separated list of key=value pairs (must include batch_name and aoi_name)
+      "tags",             # Space-separated list of key=value pairs (must include batch_name)
     ]
     meta_optional = [
       "aoi_geom_path",    # GPKG file path (optional - requires either this or aoi_stac_item_id)
