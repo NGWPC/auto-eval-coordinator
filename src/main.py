@@ -261,10 +261,15 @@ class PolygonPipeline:
         logger.debug("cleaned up temp files")
 
 
-def parsed_tags(tag_list):
+def parsed_tags(
+    tag_list: List[str],
+    aoi_geom_path: Optional[str] = None,
+    aoi_stac_item_id: Optional[str] = None,
+) -> Dict[str, str]:
+    """Parse and validate tags, deriving aoi_name from AOI arguments if not provided."""
     tags = {}
     internal_tag_keys = {"bench_src", "cand_src", "scenario", "catchment"}
-    required_tag_keys = {"batch_name", "aoi_name"}
+    required_tag_keys = {"batch_name"}
 
     forbidden_chars = {" ", "/", "&", ","}
 
@@ -298,6 +303,25 @@ def parsed_tags(tag_list):
             raise argparse.ArgumentTypeError(
                 f"Required tag '{required_key}' is missing. Required tags: {', '.join(sorted(required_tag_keys))}"
             )
+
+    # Derive aoi_name if not explicitly provided
+    if "aoi_name" not in tags:
+        if aoi_stac_item_id:
+            aoi_name = aoi_stac_item_id
+        else:
+            # Extract filename and strip extension
+            aoi_name = Path(aoi_geom_path).stem
+
+        # Validate derived aoi_name for forbidden characters
+        for char in forbidden_chars:
+            if char in aoi_name:
+                source = "aoi_stac_item_id" if aoi_stac_item_id else "aoi_geom_path"
+                raise argparse.ArgumentTypeError(
+                    f"Derived aoi_name '{aoi_name}' from {source} contains forbidden character '{char}'. "
+                    f"Forbidden characters: {', '.join(sorted(forbidden_chars))}"
+                )
+
+        tags["aoi_name"] = aoi_name
 
     if tags:
         tags_str = ",".join(f"{k}={v}" for k, v in tags.items())
@@ -356,17 +380,18 @@ if __name__ == "__main__":
     if not args.aoi_geom_path and not args.aoi_stac_item_id:
         parser.error("Must specify either --aoi_geom_path (GPKG file) or --aoi_stac_item_id (STAC item ID)")
 
+    # Flatten any space-separated tag arguments to handle both manual and Nomad invocation styles
     if args.tags and args.tags != [""]:
-        # Flatten any space-separated arguments to handle both manual and Nomad invocation styles
         flattened_tags = []
         for tag in args.tags:
             if " " in tag:
                 flattened_tags.extend(tag.split())
             else:
                 flattened_tags.append(tag)
-        args.tags = parsed_tags(flattened_tags)
     else:
-        args.tags = {}
+        flattened_tags = []
+
+    args.tags = parsed_tags(flattened_tags, args.aoi_geom_path, args.aoi_stac_item_id)
 
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
