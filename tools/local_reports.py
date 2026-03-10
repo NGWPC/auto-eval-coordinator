@@ -135,6 +135,7 @@ def analyze_job_logs(log_dir: Path, job_task_pairs: List[Tuple[str, str]]) -> Di
         r"No features found",
         r"Worker is at",
         r"distributed\.worker\.memory - WARNING - Unmanaged memory use is high",
+        r"distributed\.worker\.memory - WARNING - Ignoring provided memory limit",
         r"gc\.collect",
         r"Warning 1: Request for \d+-\d+ failed with response_code=\d+",
         r"Failed to communicate with scheduler during heartbeat",
