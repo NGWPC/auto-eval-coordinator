@@ -20,7 +20,7 @@ from metrics_aggregator import MetricsAggregator
 from nomad_job_manager import NomadJobManager
 from pipeline_log_db import PipelineLogDB
 from pipeline_stages import AgreementStage, InundationStage, MosaicStage
-from pipeline_utils import PathFactory, PipelineResult
+from pipeline_utils import PathFactory, PipelineResult, select_benchmark_rasters
 
 logger = logging.getLogger(__name__)
 
@@ -78,18 +78,14 @@ class PolygonPipeline:
         # Extract benchmark rasters from STAC scenarios
         raw_scenarios = stac_data.get("scenarios", {})
         self.stac_results = raw_scenarios
-        self.benchmark_scenarios = {}
         fim_type = self.config.defaults.fim_type
-        target_key = "depth" if fim_type == "depth" else "extent"
-        for collection, scenarios in raw_scenarios.items():
-            self.benchmark_scenarios[collection] = {}
-            for scenario_name, scenario_data in scenarios.items():
-                rasters = []
-                for key in scenario_data:
-                    if target_key in key.lower():
-                        rasters = scenario_data[key]
-                        break
-                self.benchmark_scenarios[collection][scenario_name] = rasters
+        self.benchmark_scenarios = {
+            collection: {
+                scenario_name: select_benchmark_rasters(fim_type, scenario_data)
+                for scenario_name, scenario_data in scenarios.items()
+            }
+            for collection, scenarios in raw_scenarios.items()
+        }
 
         if self.flow_scenarios:
             logger.debug(f"Found {len(self.flow_scenarios)} collections")

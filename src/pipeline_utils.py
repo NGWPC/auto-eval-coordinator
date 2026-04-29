@@ -107,3 +107,44 @@ class PathFactory:
         """Generate path for AOI file: base/{aoi}__aoi.gpkg"""
         filename = f"{self.aoi_name}__aoi.gpkg"
         return f"{self.base}/{filename}"
+
+
+def select_benchmark_rasters(fim_type: str, scenario_data: Dict[str, List[str]]) -> List[str]:
+    """Return raster paths from scenario_data matching the fim_type key convention.
+
+    Scans scenario_data keys for 'depth' (fim_type=='depth') or 'extent' (any
+    other fim_type). Returns the first matching value, or [] if no key matches.
+    """
+    target_key = "depth" if fim_type == "depth" else "extent"
+    for key in scenario_data:
+        if target_key in key.lower():
+            return scenario_data[key]
+    return []
+
+
+def split_inundation_outputs_by_branch(
+    catchments: Dict[str, Dict[str, Any]],
+    valid_outputs: List[str],
+    path_factory: "PathFactory",
+    result: PipelineResult,
+) -> None:
+    """Partition valid inundation outputs into primary and branch-0 lists on result.
+
+    Routes by branch_id==0 (hole-fill) vs. anything else including None (primary).
+    Mutates result via set_path(); only call this in depth mode.
+    """
+    primary_outputs: List[str] = []
+    branch0_outputs: List[str] = []
+    for catch_id, catchment_info in catchments.items():
+        path = path_factory.inundation_output_path(
+            result.collection_name, result.scenario_name, catch_id
+        )
+        if path not in valid_outputs:
+            continue
+        bid = catchment_info.get("branch_id")
+        if bid == 0:
+            branch0_outputs.append(path)
+        else:
+            primary_outputs.append(path)
+    result.set_path("inundation", "primary_outputs", primary_outputs)
+    result.set_path("inundation", "branch0_outputs", branch0_outputs)

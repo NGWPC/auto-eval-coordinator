@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_serializer
 
 from load_config import AppConfig
 from nomad_job_manager import NomadError
-from pipeline_utils import PathFactory, PipelineResult
+from pipeline_utils import PathFactory, PipelineResult, split_inundation_outputs_by_branch
 
 logger = logging.getLogger(__name__)
 
@@ -236,25 +236,13 @@ class InundationStage(PipelineStage):
                     result.set_path("inundation", "valid_outputs", valid_outputs)
 
                     if fim_type == "depth":
-                        # Partition by branch_id: non-branch-0 = primary, branch-0 = hole-fill
-                        primary_outputs = []
-                        branch0_outputs = []
-                        for catch_id, catchment_info in self.catchments.items():
-                            path = self.path_factory.inundation_output_path(
-                                result.collection_name, result.scenario_name, catch_id
-                            )
-                            if path not in valid_outputs:
-                                continue
-                            bid = catchment_info.get("branch_id")
-                            if bid == 0:
-                                branch0_outputs.append(path)
-                            else:
-                                primary_outputs.append(path)
-                        result.set_path("inundation", "primary_outputs", primary_outputs)
-                        result.set_path("inundation", "branch0_outputs", branch0_outputs)
+                        split_inundation_outputs_by_branch(
+                            self.catchments, valid_outputs, self.path_factory, result
+                        )
                         logger.debug(
-                            f"[{result.scenario_id}] branch split: {len(primary_outputs)} primary, "
-                            f"{len(branch0_outputs)} branch-0"
+                            f"[{result.scenario_id}] branch split: "
+                            f"{len(result.get_path('inundation', 'primary_outputs'))} primary, "
+                            f"{len(result.get_path('inundation', 'branch0_outputs'))} branch-0"
                         )
 
                     result.status = "inundation_complete"

@@ -19,7 +19,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from load_config import AppConfig, Defaults, JobNames
 from pipeline_stages import AgreementStage, InundationStage, MosaicStage
-from pipeline_utils import PathFactory, PipelineResult
+from pipeline_utils import (
+    PathFactory,
+    PipelineResult,
+    select_benchmark_rasters,
+    split_inundation_outputs_by_branch,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +65,7 @@ def make_path_factory(tmp_path: Path) -> PathFactory:
 
 class TestBenchmarkRasterSelection:
     """
-    The key-selection block in main.py selects depth or extent keys
+    select_benchmark_rasters() selects depth or extent keys
     from the STAC scenario dict based on fim_type.
     """
 
@@ -70,31 +75,19 @@ class TestBenchmarkRasterSelection:
         "flow_file": ["/flow.csv"],
     }
 
-    def _select(self, fim_type: str, scenario_data: Dict) -> List[str]:
-        """Replicate the selection logic from main.py initialize()."""
-        target_key = "depth" if fim_type == "depth" else "extent"
-        for key in scenario_data:
-            if target_key in key.lower():
-                return scenario_data[key]
-        return []
-
     def test_extent_mode_selects_extent(self):
-        result = self._select("extent", self.SCENARIO_DATA)
-        assert result == ["/bench_extent.tif"]
+        assert select_benchmark_rasters("extent", self.SCENARIO_DATA) == ["/bench_extent.tif"]
 
     def test_depth_mode_selects_depth(self):
-        result = self._select("depth", self.SCENARIO_DATA)
-        assert result == ["/bench_depth.tif"]
+        assert select_benchmark_rasters("depth", self.SCENARIO_DATA) == ["/bench_depth.tif"]
 
     def test_depth_mode_no_depth_key_returns_empty(self):
         data = {"extent_raster": ["/e.tif"], "flow_file": ["/f.csv"]}
-        result = self._select("depth", data)
-        assert result == []
+        assert select_benchmark_rasters("depth", data) == []
 
     def test_extent_mode_no_extent_key_returns_empty(self):
         data = {"depth_raster": ["/d.tif"], "flow_file": ["/f.csv"]}
-        result = self._select("extent", data)
-        assert result == []
+        assert select_benchmark_rasters("extent", data) == []
 
 
 # ---------------------------------------------------------------------------
@@ -103,38 +96,9 @@ class TestBenchmarkRasterSelection:
 
 class TestInundationBranchSplit:
     """
-    In depth mode, InundationStage must partition valid_outputs into
-    primary_outputs (branch_id != 0) and branch0_outputs (branch_id == 0).
+    In depth mode, split_inundation_outputs_by_branch() must partition valid_outputs
+    into primary_outputs (branch_id != 0) and branch0_outputs (branch_id == 0).
     """
-
-    def _run_split(
-        self,
-        catchments: Dict[str, Dict],
-        valid_outputs: List[str],
-        fim_type: str,
-        path_factory: PathFactory,
-        result: PipelineResult,
-    ):
-        """Replicate the branch-split logic from InundationStage.run()."""
-        if fim_type != "depth":
-            return
-
-        primary_outputs = []
-        branch0_outputs = []
-        for catch_id, catchment_info in catchments.items():
-            path = path_factory.inundation_output_path(
-                result.collection_name, result.scenario_name, catch_id
-            )
-            if path not in valid_outputs:
-                continue
-            bid = catchment_info.get("branch_id")
-            if bid == 0:
-                branch0_outputs.append(path)
-            else:
-                primary_outputs.append(path)
-
-        result.set_path("inundation", "primary_outputs", primary_outputs)
-        result.set_path("inundation", "branch0_outputs", branch0_outputs)
 
     def test_split_separates_branch0(self, tmp_path):
         pf = make_path_factory(tmp_path)
@@ -150,7 +114,7 @@ class TestInundationBranchSplit:
             for cid in catchments
         ]
 
-        self._run_split(catchments, valid_outputs, "depth", pf, result)
+        split_inundation_outputs_by_branch(catchments, valid_outputs, pf, result)
 
         primary = result.get_path("inundation", "primary_outputs")
         branch0 = result.get_path("inundation", "branch0_outputs")
@@ -169,18 +133,14 @@ class TestInundationBranchSplit:
             "catchA": {"branch_id": 1, "parquet_path": "/a.parquet"},
             "catchB": {"branch_id": 0, "parquet_path": "/b.parquet"},
         }
-        # Only catchA succeeded
         valid_outputs = [
             pf.inundation_output_path(result.collection_name, result.scenario_name, "catchA")
         ]
 
-        self._run_split(catchments, valid_outputs, "depth", pf, result)
+        split_inundation_outputs_by_branch(catchments, valid_outputs, pf, result)
 
-        primary = result.get_path("inundation", "primary_outputs")
-        branch0 = result.get_path("inundation", "branch0_outputs")
-
-        assert len(primary) == 1
-        assert len(branch0) == 0
+        assert len(result.get_path("inundation", "primary_outputs")) == 1
+        assert len(result.get_path("inundation", "branch0_outputs")) == 0
 
     def test_split_all_branch0_produces_empty_primary(self, tmp_path):
         pf = make_path_factory(tmp_path)
@@ -195,23 +155,16 @@ class TestInundationBranchSplit:
             for cid in catchments
         ]
 
-        self._run_split(catchments, valid_outputs, "depth", pf, result)
+        split_inundation_outputs_by_branch(catchments, valid_outputs, pf, result)
 
         assert result.get_path("inundation", "primary_outputs") == []
         assert len(result.get_path("inundation", "branch0_outputs")) == 2
 
     def test_split_not_called_in_extent_mode(self, tmp_path):
         """In extent mode, primary_outputs and branch0_outputs must not be set."""
-        pf = make_path_factory(tmp_path)
         result = make_result()
-
-        catchments = {"catchA": {"branch_id": 0, "parquet_path": "/a.parquet"}}
-        valid_outputs = [
-            pf.inundation_output_path(result.collection_name, result.scenario_name, "catchA")
-        ]
-
-        self._run_split(catchments, valid_outputs, "extent", pf, result)
-
+        # extent mode: the production guard (if fim_type == "depth") means this
+        # function is never called — assert paths remain unset
         assert result.get_path("inundation", "primary_outputs") is None
         assert result.get_path("inundation", "branch0_outputs") is None
 
@@ -225,12 +178,10 @@ class TestInundationBranchSplit:
             pf.inundation_output_path(result.collection_name, result.scenario_name, "catchA")
         ]
 
-        self._run_split(catchments, valid_outputs, "depth", pf, result)
+        split_inundation_outputs_by_branch(catchments, valid_outputs, pf, result)
 
-        primary = result.get_path("inundation", "primary_outputs")
-        branch0 = result.get_path("inundation", "branch0_outputs")
-        assert len(primary) == 1
-        assert len(branch0) == 0
+        assert len(result.get_path("inundation", "primary_outputs")) == 1
+        assert len(result.get_path("inundation", "branch0_outputs")) == 0
 
 
 # ---------------------------------------------------------------------------
