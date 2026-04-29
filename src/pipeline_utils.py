@@ -72,8 +72,8 @@ class PathFactory:
         filename = f"{self.aoi_name}__{collection_name}__{scenario_name}__flowfile.csv"
         return self.source_scenario_path(collection_name, scenario_name, filename)
 
-    def hand_mosaic_path(self, collection_name: str, scenario_name: str) -> str:
-        filename = f"{self.aoi_name}__{collection_name}__{scenario_name}__inundate_mosaic.tif"
+    def hand_mosaic_path(self, collection_name: str, scenario_name: str, fim_type: str) -> str:
+        filename = f"{self.aoi_name}__{collection_name}__{scenario_name}__{fim_type}__inundate_mosaic.tif"
         return self.source_scenario_path(collection_name, scenario_name, filename)
 
     def benchmark_mosaic_path(self, collection_name: str, scenario_name: str) -> str:

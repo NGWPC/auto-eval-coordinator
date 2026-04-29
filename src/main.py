@@ -79,18 +79,17 @@ class PolygonPipeline:
         raw_scenarios = stac_data.get("scenarios", {})
         self.stac_results = raw_scenarios
         self.benchmark_scenarios = {}
+        fim_type = self.config.defaults.fim_type
+        target_key = "depth" if fim_type == "depth" else "extent"
         for collection, scenarios in raw_scenarios.items():
             self.benchmark_scenarios[collection] = {}
             for scenario_name, scenario_data in scenarios.items():
-                # Find extent key (could be extent_raster, extent, etc.)
-                extent_key = None
-                for key in scenario_data.keys():
-                    if "extent" in key.lower():
-                        extent_key = key
+                rasters = []
+                for key in scenario_data:
+                    if target_key in key.lower():
+                        rasters = scenario_data[key]
                         break
-                self.benchmark_scenarios[collection][scenario_name] = (
-                    scenario_data.get(extent_key, []) if extent_key else []
-                )
+                self.benchmark_scenarios[collection][scenario_name] = rasters
 
         if self.flow_scenarios:
             logger.debug(f"Found {len(self.flow_scenarios)} collections")

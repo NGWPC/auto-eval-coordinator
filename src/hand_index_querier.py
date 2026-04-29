@@ -185,13 +185,24 @@ class HandIndexQuerier:
             crs="EPSG:5070",
         )
 
+        # Check whether hydrotables has branch_id before selecting it
+        ht_cols = {
+            row[0]
+            for row in self.con.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'hydrotables'"
+            ).fetchall()
+        }
+        branch_id_select = "h.branch_id" if "branch_id" in ht_cols else "NULL AS branch_id"
+
         # Build and run the attribute query using non-partitioned tables
         sql_attr = (
             cte
-            + """
+            + f"""
         SELECT
           fc.catchment_id,
           h.csv_path,
+          {branch_id_select},
           hrr.raster_path AS rem_raster_path,
           hcr.raster_path AS catchment_raster_path
         FROM filtered_catchments AS fc
@@ -309,17 +320,29 @@ class HandIndexQuerier:
                 df.to_parquet(str(out_path), index=False)
                 logger.info("Wrote %d rows for catchment '%s' → %s", len(df), catch_id, out_path)
 
+                branch_id_val = None
+                if "branch_id" in df.columns:
+                    non_null = df["branch_id"].dropna()
+                    if not non_null.empty:
+                        branch_id_val = int(non_null.iloc[0])
                 catchments[catch_id] = {
                     "parquet_path": str(out_path),
                     "row_count": len(df),
+                    "branch_id": branch_id_val,
                 }
         else:
             # Just return metadata without writing files
             for catch_id in filtered_attrs["catchment_id"].unique():
                 group = filtered_attrs[filtered_attrs["catchment_id"] == catch_id]
+                branch_id_val = None
+                if "branch_id" in group.columns:
+                    non_null = group["branch_id"].dropna()
+                    if not non_null.empty:
+                        branch_id_val = int(non_null.iloc[0])
                 catchments[catch_id] = {
                     "row_count": len(group),
                     "data": group.drop(columns=["catchment_id"]).to_dict("records"),
+                    "branch_id": branch_id_val,
                 }
 
         return catchments

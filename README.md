@@ -93,10 +93,10 @@ This will:
     - <test_case_id>-<scenario>__agreement.tif: The agreement raster for this scenario 
     - <test_case_id>-<scenario>__benchmark_mosiac.tif: The mosaiced benchmark raster used as the benchmark raster 
     - <test_case_id>-<scenario>__flowfile.csv: The merged flowfile used for this scenario 
-    - <test_case_id>-<scenario>__inundate_mosiac.tif: The mosaiced HAND extent used as the candidate raster for this scenario 
+    - <test_case_id>-<scenario>__<fim_type>__inundate_mosaic.tif: The mosaiced HAND inundation raster (extent or depth depending on FIM_TYPE) used as the candidate raster for this scenario 
     - <test_case_id>-<scenario>__metrics.csv: A single row CSV containing the metrics for this scenario. These CSV’s are aggregated together along with additional metadata to create the test cases agg_metrics.csv file 
     - catchment_extents/ 
-      - <test_case_id>__<unique-catchment-id>.tif: The HAND extents for a single HAND catchment. These are merged together to form the inundate_mosaic.tif for the scenario 
+      - <test_case_id>__<unique-catchment-id>.tif: The HAND inundation raster (extent or depth) for a single catchment. These are merged to form the <fim_type>__inundate_mosaic.tif for the scenario 
 
 
 ### Running a batch of pipelines
