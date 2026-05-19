@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_serializer
 
 from load_config import AppConfig
 from nomad_job_manager import NomadError
-from pipeline_utils import PathFactory, PipelineResult
+from pipeline_utils import PathFactory, PipelineResult, split_inundation_outputs_by_branch
 
 logger = logging.getLogger(__name__)
 
@@ -227,14 +227,24 @@ class InundationStage(PipelineStage):
 
         # Validate files and update results
         updated_results = []
+        fim_type = self.config.defaults.fim_type
         for result in valid_results:
             outputs = scenario_outputs.get(result.scenario_id, [])
             if outputs:
                 valid_outputs = await self.data_svc.validate_files(outputs)
                 if valid_outputs:
-                    result.set_path(
-                        "inundation", "valid_outputs", valid_outputs
-                    )
+                    result.set_path("inundation", "valid_outputs", valid_outputs)
+
+                    if fim_type == "depth":
+                        split_inundation_outputs_by_branch(
+                            self.catchments, valid_outputs, self.path_factory, result
+                        )
+                        logger.debug(
+                            f"[{result.scenario_id}] branch split: "
+                            f"{len(result.get_path('inundation', 'primary_outputs'))} primary, "
+                            f"{len(result.get_path('inundation', 'branch0_outputs'))} branch-0"
+                        )
+
                     result.status = "inundation_complete"
                     updated_results.append(result)
                     logger.debug(
@@ -356,6 +366,7 @@ class MosaicStage(PipelineStage):
         hand_tasks = []
         benchmark_tasks = []
         task_results = []
+        fim_type = self.config.defaults.fim_type
 
         for result in valid_results:
             valid_outputs = result.get_path("inundation", "valid_outputs")
@@ -369,27 +380,47 @@ class MosaicStage(PipelineStage):
 
             # HAND mosaic
             hand_output_path = self.path_factory.hand_mosaic_path(
-                result.collection_name, result.scenario_name
+                result.collection_name, result.scenario_name, fim_type
             )
             result.set_path("mosaic", "hand", hand_output_path)
-            hand_meta = self._create_mosaic_meta(
-                valid_outputs, hand_output_path
-            )
 
-            # add cand_src and scenario internal tags for HAND mosaic
             hand_internal_tags = {
                 "cand_src": "hand",
                 "scenario": result.scenario_name,
             }
             hand_tags_str = self._create_tags_str(hand_internal_tags)
 
-            hand_task = asyncio.create_task(
-                self.nomad.dispatch_and_track(
-                    self.config.jobs.fim_mosaicker,
-                    prefix=hand_tags_str,
-                    meta=hand_meta.model_dump(),
+            if fim_type == "depth":
+                # Two-pass mosaic: pass 1 = non-branch-0 only, pass 2 = hole-fill with branch-0
+                primary_outputs = result.get_path("inundation", "primary_outputs") or []
+                branch0_outputs = result.get_path("inundation", "branch0_outputs") or []
+
+                if not primary_outputs:
+                    # All catchments are branch-0; fall back to single pass
+                    logger.warning(
+                        f"[{result.scenario_id}] All catchments are branch-0; using single-pass mosaic"
+                    )
+                    hand_task = asyncio.create_task(
+                        self._run_depth_mosaic_single_pass(
+                            valid_outputs, hand_output_path, hand_tags_str
+                        )
+                    )
+                else:
+                    hand_task = asyncio.create_task(
+                        self._run_depth_mosaic_two_pass(
+                            primary_outputs, branch0_outputs, hand_output_path, hand_tags_str
+                        )
+                    )
+            else:
+                hand_meta = self._create_mosaic_meta(valid_outputs, hand_output_path)
+                hand_task = asyncio.create_task(
+                    self.nomad.dispatch_and_track(
+                        self.config.jobs.fim_mosaicker,
+                        prefix=hand_tags_str,
+                        meta=hand_meta.model_dump(),
+                    )
                 )
-            )
+
             hand_tasks.append(hand_task)
 
             # stagger delay to spread load on Nomad
@@ -478,6 +509,33 @@ class MosaicStage(PipelineStage):
             raise NomadError(error_msg)
 
         return successful_results
+
+    async def _run_depth_mosaic_single_pass(
+        self, inputs: List[str], output_path: str, tags_str: str
+    ) -> Any:
+        """Run a single-pass NaN-MAX mosaic (depth mode fallback when all catchments are branch-0)."""
+        meta = self._create_mosaic_meta(inputs, output_path)
+        return await self.nomad.dispatch_and_track(
+            self.config.jobs.fim_mosaicker, prefix=tags_str, meta=meta.model_dump()
+        )
+
+    async def _run_depth_mosaic_two_pass(
+        self,
+        primary_outputs: List[str],
+        branch0_outputs: List[str],
+        output_path: str,
+        tags_str: str,
+    ) -> Any:
+        """Run two-pass NaN-MAX mosaic: pass 1 = non-branch-0 only; pass 2 = hole-fill with branch-0."""
+        pass1_meta = self._create_mosaic_meta(primary_outputs, output_path)
+        await self.nomad.dispatch_and_track(
+            self.config.jobs.fim_mosaicker, prefix=tags_str, meta=pass1_meta.model_dump()
+        )
+        if branch0_outputs:
+            pass2_meta = self._create_mosaic_meta([output_path] + branch0_outputs, output_path)
+            return await self.nomad.dispatch_and_track(
+                self.config.jobs.fim_mosaicker, prefix=tags_str, meta=pass2_meta.model_dump()
+            )
 
     def _create_mosaic_meta(
         self, raster_paths: List[str], output_path: str

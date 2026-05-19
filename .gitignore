@@ -19,6 +19,8 @@ pipeline_trace.json
 .data
 data/
 local-logs/
+*.gpkg-shm
+*.gpkg-wal
 local-reports/
 cache/aiohttp_cache.sqlite
 reports/
