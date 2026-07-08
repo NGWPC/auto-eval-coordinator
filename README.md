@@ -13,8 +13,8 @@ While the current evaluation pipeline is primarily designed to generate HAND FIM
 4. Run `docker compose -f docker-compose-local.yml up`
 5. Register Jobs (see ./local-nomad/README.md)
 6. Load the test stac data by running `./testdata/benchmark/load-test-stac-data.sh`
-7. Create required container images from autoeval-jobs repo. Once cloned the autoeval-jobs repo and inside it, execute `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
-8. Build the container image inside this repo with `docker build -t autoeval-coordinator:local .`
+7. Obtain job images from the autoeval-jobs repo. Pull from GHCR (`docker pull ghcr.io/ngwpc/autoeval-jobs:owp-latest && docker pull ghcr.io/ngwpc/autoeval-jobs-gval:owp-latest`) or build locally by cloning the repo and running `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
+8. Build the coordinator image inside this repo with `docker build -t autoeval-coordinator:local .`
 9. Obtain AWS credentials for the NGWPC fimc-data bucket that give read privileges to bucket objects. This is necessary to allow loading masking dictionaries for the agreement job.
 10. Make sure your host machine's shell has the correct NOMAD_ADDR variable set. For working locally `NOMAD_ADDR="http://localhost:4646"`. This is mostly important for running commands using the Nomad CLI program.
 11. Dispatch a pipeline job through Nomad UI or API (see example below)
@@ -102,3 +102,5 @@ This will:
 ### Running a batch of pipelines
 
 The above instructions are for running a single test evaluation pipeline using a local nomad cluster. If you know which HAND outputs you want to evaluate and where its HAND index is located and you have access to the FIM Benchmark STAC this should be sufficient to run single pipelines. This repository also contains functionality for running batches of dozens to thousands of pipelines using either a local Nomad cluster running within the Parallel Works environment or a Nomad cluster deployed to the NGWPC AWS Test account. For more information on running batches please refer to `docs/batch-run-guide-ParallelWorks.md` and `docs/batch-run-guide-AWS-Test.md`.
+
+For deploying to the OWP environment, refer to `docs/Deployment_Runbook.md` for a full phased deployment guide and `docs/Verification_Guide.md` for an end-to-end verification checklist.

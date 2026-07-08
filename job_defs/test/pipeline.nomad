@@ -19,7 +19,7 @@ job "pipeline" {
       "aoi_stac_item_id", # STAC item ID for direct querying (optional)
       "benchmark_sources",# Comma-separated list
       "fim_type",         # extent or depth (default: extent)
-      "registry_token",   # Required if using private registry
+      "registry_token",   # No longer required — images are on public GHCR
       "aws_access_key",
       "aws_secret_key",
       "aws_session_token",
@@ -43,16 +43,10 @@ job "pipeline" {
       driver = "docker"
 
       config {
-        image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-coordinator-v0.1"
-        force_pull = false
-        # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
+        # TODO: change to :latest once owp-deployment is merged into main
+        image = "ghcr.io/ngwpc/auto-eval-coordinator:owp-latest"
+        force_pull = true
         network_mode = "host"
-
-        # Docker registry authentication
-        auth {
-          username = "ReadOnly_NGWPC_Group_Deploy_Token"
-          password = "${NOMAD_META_registry_token}"
-        }
 
         args = [
           "--outputs_path", "${NOMAD_META_outputs_path}",
@@ -89,8 +83,6 @@ job "pipeline" {
         NOMAD_ADDRESS         = "http://nomad-server-test.test.nextgenwaterprediction.com:4646/"
         NOMAD_TOKEN           = "${NOMAD_META_nomad_token}" # Changed to use meta parameter for test
         NOMAD_NAMESPACE       = "default"
-        NOMAD_REGISTRY_TOKEN        = "${NOMAD_META_registry_token}"
- 
         # Pipeline Configuration
         FIM_TYPE              = "extent"
         HTTP_CONNECTION_LIMIT = "100"
