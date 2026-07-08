@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           ORG="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          REPO="autoeval-coordinator"
+          REPO="auto-eval-coordinator"
           IMAGE_BASE="${REGISTRY}/${ORG}/${REPO}"
           echo "image_base=${IMAGE_BASE}" >> "$GITHUB_OUTPUT"
           if [ "${GITHUB_REF_NAME}" = "owp-deployment" ]; then
@@ -73,7 +73,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push autoeval-coordinator image
+      - name: Build & push auto-eval-coordinator image
         uses: docker/build-push-action@v6
         with:
           context: .
