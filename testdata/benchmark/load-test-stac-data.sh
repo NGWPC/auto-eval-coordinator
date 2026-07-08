@@ -8,6 +8,19 @@ set -e
 STAC_API_URL="http://localhost:8082"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+echo "Waiting for STAC API to be ready..."
+for i in $(seq 1 30); do
+  if curl -sf "${STAC_API_URL}/_mgmt/ping" | grep -q PONG; then
+    echo "STAC API is ready"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "STAC API did not become ready in time"
+    exit 1
+  fi
+  sleep 2
+done
+
 echo "Loading STAC collection..."
 if curl -X POST "${STAC_API_URL}/collections" \
   -H 'Content-Type: application/json' \
