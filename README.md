@@ -13,7 +13,7 @@ While the current evaluation pipeline is primarily designed to generate HAND FIM
 4. Run `docker compose -f docker-compose-local.yml up`
 5. Register Jobs (see ./local-nomad/README.md)
 6. Load the test stac data by running `./testdata/benchmark/load-test-stac-data.sh`
-7. Obtain job images from the autoeval-jobs repo. Pull from GHCR (`docker pull ghcr.io/ngwpc/autoeval-jobs:owp-latest && docker pull ghcr.io/ngwpc/autoeval-jobs-gval:owp-latest`) or build locally by cloning the repo and running `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
+7. Obtain job images from the autoeval-jobs repo. Pull from GHCR (`docker pull ghcr.io/ngwpc/autoeval-jobs:latest && docker pull ghcr.io/ngwpc/autoeval-jobs-gval:latest`) or build locally by cloning the repo and running `docker build -f Dockerfile.gval -t autoeval-jobs-gval:local . && docker build -t autoeval-jobs:local .`
 8. Build the coordinator image inside this repo with `docker build -t autoeval-coordinator:local .`
 9. Obtain AWS credentials for the NGWPC fimc-data bucket that give read privileges to bucket objects. This is necessary to allow loading masking dictionaries for the agreement job.
 10. Make sure your host machine's shell has the correct NOMAD_ADDR variable set. For working locally `NOMAD_ADDR="http://localhost:4646"`. This is mostly important for running commands using the Nomad CLI program.

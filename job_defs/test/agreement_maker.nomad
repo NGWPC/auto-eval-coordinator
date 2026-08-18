@@ -39,8 +39,7 @@ job "agreement_maker" {
       driver = "docker"
 
       config {
-        # TODO: change to :latest once owp-deployment is merged into main
-        image = "ghcr.io/ngwpc/auto-eval-jobs-gval:owp-latest"
+        image = "ghcr.io/ngwpc/auto-eval-jobs-gval:latest"
         force_pull = true
         command = "python3"
         args = [

@@ -43,8 +43,7 @@ job "pipeline" {
       driver = "docker"
 
       config {
-        # TODO: change to :latest once owp-deployment is merged into main
-        image = "ghcr.io/ngwpc/auto-eval-coordinator:owp-latest"
+        image = "ghcr.io/ngwpc/auto-eval-coordinator:latest"
         force_pull = true
         network_mode = "host"
 

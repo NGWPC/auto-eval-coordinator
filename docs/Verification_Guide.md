@@ -55,7 +55,7 @@ Image pull verification from the admin machine is covered in Deployment_Runbook.
 
 - **Pass:** `force_pull = true` confirmed in all four job definitions — images will refresh on each dispatch
 
-**Why `force_pull = true`:** these job definitions reference the floating `owp-latest` tag rather than an immutable per-commit tag. Nomad's default Docker driver behavior caches images per client keyed on tag, not digest — without `force_pull`, a client that has already pulled `owp-latest` once will keep running that cached image indefinitely, even after a new CI push updates what `owp-latest` points to in the registry. `force_pull` trades per-dispatch pull overhead for guaranteeing every dispatch runs the current image. Note the `owp-latest` → `latest` rename TODO in the Overview above does not by itself fix this — `latest` is just as mutable a tag. Removing `force_pull` safely would require pinning job defs to immutable per-commit/release tags instead of a floating `*-latest` tag.
+**Why `force_pull = true`:** job definitions reference the floating `latest` tag, and Nomad caches images per client by tag, not digest. Without `force_pull`, a client keeps running whatever it cached under `latest`, even after CI pushes a newer image. `force_pull` trades a small per-dispatch pull cost for guaranteeing every dispatch runs the current image.
 
 ---
 
@@ -426,7 +426,7 @@ The symptoms below can surface while running this guide (typically at §1 or dur
 
 **Container Registry**
 - **Pass:** All three `ghcr.io/ngwpc/auto-eval-*` packages are public
-- **Pass:** CI on `owp-deployment` branch completed and pushed `owp-latest` tags
+- **Pass:** CI on `owp-deployment` branch completed and pushed `latest` tags
 
 **Job Definitions**
 - **Pass:** All four jobs registered in Nomad

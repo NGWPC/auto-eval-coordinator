@@ -14,14 +14,12 @@ This runbook covers the OWP deployment procedure. It aligns with **PI-7 UAT Test
 
 | Component | Details |
 |-----------|---------|
-| Coordinator | `ghcr.io/ngwpc/auto-eval-coordinator:owp-latest` |
-| Jobs image | `ghcr.io/ngwpc/auto-eval-jobs:owp-latest` |
-| Jobs (GVAL) image | `ghcr.io/ngwpc/auto-eval-jobs-gval:owp-latest` |
+| Coordinator | `ghcr.io/ngwpc/auto-eval-coordinator:latest` |
+| Jobs image | `ghcr.io/ngwpc/auto-eval-jobs:latest` |
+| Jobs (GVAL) image | `ghcr.io/ngwpc/auto-eval-jobs-gval:latest` |
 | Nomad cluster | Provisioned separately via [nomad-runner](https://github.com/NGWPC/nomad-runner) |
 | STAC API | BenchmarkCat STAC (URL from Terraform output); local `stac-fastapi-pgstac` for dev |
 | Registry | Public GHCR — no auth required |
-
-> **TODO:** Image tags are currently `owp-latest`, built from the `owp-deployment` branch. Once `owp-deployment` is merged into `main`, update all image references to `latest` (e.g. `ghcr.io/ngwpc/auto-eval-coordinator:latest`) and update CI to push `latest` on merges to `main`.
 
 The Nomad cluster (server + EC2 worker fleet) is **not provisioned by this repo**. Refer to the `nomad-runner` repo for Terraform-based cluster setup before proceeding.
 
@@ -117,9 +115,9 @@ Export both `NOMAD_ADDR` and `NOMAD_TOKEN` as a standard step for any nomad-runn
 Before registering jobs or running any pipeline commands, pull the images from GHCR and confirm the names match what the Nomad job definitions and `docker run` commands expect.
 
 ```bash
-docker pull ghcr.io/ngwpc/auto-eval-coordinator:owp-latest
-docker pull ghcr.io/ngwpc/auto-eval-jobs:owp-latest
-docker pull ghcr.io/ngwpc/auto-eval-jobs-gval:owp-latest
+docker pull ghcr.io/ngwpc/auto-eval-coordinator:latest
+docker pull ghcr.io/ngwpc/auto-eval-jobs:latest
+docker pull ghcr.io/ngwpc/auto-eval-jobs-gval:latest
 ```
 
 Verify the images are present and tagged correctly:
@@ -127,9 +125,9 @@ Verify the images are present and tagged correctly:
 ```bash
 docker images | grep ngwpc
 # Expected output (names must match exactly):
-# ghcr.io/ngwpc/auto-eval-coordinator   owp-latest   ...
-# ghcr.io/ngwpc/auto-eval-jobs          owp-latest   ...
-# ghcr.io/ngwpc/auto-eval-jobs-gval     owp-latest   ...
+# ghcr.io/ngwpc/auto-eval-coordinator   latest   ...
+# ghcr.io/ngwpc/auto-eval-jobs          latest   ...
+# ghcr.io/ngwpc/auto-eval-jobs-gval     latest   ...
 ```
 
 **Gate:** Do not proceed until all three images are present locally, either pulled from GHCR or built via the fallback below.
@@ -145,12 +143,12 @@ Build the images locally and tag them to match what the Nomad job definitions ex
 ```bash
 # auto-eval-coordinator (this repo)
 git clone https://github.com/NGWPC/auto-eval-coordinator.git -b owp-deployment
-docker build -t ghcr.io/ngwpc/auto-eval-coordinator:owp-latest ./auto-eval-coordinator
+docker build -t ghcr.io/ngwpc/auto-eval-coordinator:latest ./auto-eval-coordinator
 
 # auto-eval-jobs and auto-eval-jobs-gval (separate repo, built from two Dockerfiles at its root; Dockerfiles live on main)
 git clone https://github.com/NGWPC/auto-eval-jobs.git
-docker build -t ghcr.io/ngwpc/auto-eval-jobs:owp-latest -f ./auto-eval-jobs/Dockerfile ./auto-eval-jobs
-docker build -t ghcr.io/ngwpc/auto-eval-jobs-gval:owp-latest -f ./auto-eval-jobs/Dockerfile.gval ./auto-eval-jobs
+docker build -t ghcr.io/ngwpc/auto-eval-jobs:latest -f ./auto-eval-jobs/Dockerfile ./auto-eval-jobs
+docker build -t ghcr.io/ngwpc/auto-eval-jobs-gval:latest -f ./auto-eval-jobs/Dockerfile.gval ./auto-eval-jobs
 ```
 
 Tagging locally-built images with the same `ghcr.io/...` names lets the Nomad job definitions reference them unmodified — `docker pull` is simply skipped for that image. This only works if the Nomad client nodes pull from the **same Docker daemon** the images were built on (e.g. a single-node dev cluster). For a multi-node cluster, push the locally-built images to a registry that all client nodes can reach (an internal registry, or GHCR once access is restored) instead of relying on the local Docker image cache.

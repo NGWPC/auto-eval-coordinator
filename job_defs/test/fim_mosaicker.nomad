@@ -37,8 +37,7 @@ job "fim_mosaicker" {
       driver = "docker"
 
       config {
-        # TODO: change to :latest once owp-deployment is merged into main
-        image = "ghcr.io/ngwpc/auto-eval-jobs:owp-latest"
+        image = "ghcr.io/ngwpc/auto-eval-jobs:latest"
         force_pull = true
 
         command = "python3"

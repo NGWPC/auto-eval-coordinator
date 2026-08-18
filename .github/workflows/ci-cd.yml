@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, owp-deployment]
   push:
-    branches: [main]
+    branches: [main, owp-deployment]
 
 permissions:
   contents: read
