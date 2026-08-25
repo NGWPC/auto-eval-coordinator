@@ -1,0 +1,115 @@
+job "fim_mosaicker" {
+  datacenters = ["dc1"] 
+  type        = "batch"
+
+  constraint {
+    attribute = "${node.class}"
+    value     = "linux"
+  }
+
+  parameterized {
+    meta_required = [
+      "raster_paths", 
+      "output_path",
+      "fim_type",
+    ]
+    meta_optional = [
+      "registry_token", # Required if using private registry auth below
+      "aws_access_key",
+      "aws_secret_key",
+      "aws_session_token",
+      "clip_geometry_path",
+    ]
+  }
+
+  group "mosaicker-processor" {
+    reschedule {
+      attempts = 0 # this needs to only be 0 re-attempts or will mess up pipeline job tracking
+    }
+
+    restart {
+      attempts = 3        # Try N times on the same node
+      delay    = "15s"    # Wait between attempts
+      mode     = "fail"   # Fail after attempts exhausted
+    }
+
+    task "processor" {
+      driver = "docker"
+
+      config {
+        # use last known stable version in test
+        image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-jobs-v0.2" 
+        # force_pull = false # use a cached image on client if available. To force a pull need to change back to force_pull = true
+        force_pull = true 
+
+        auth {
+          username = "ReadOnly_NGWPC_Group_Deploy_Token"
+          password = "${NOMAD_META_registry_token}"
+        }
+
+        command = "python3"
+        args = [
+          "/deploy/fim_mosaicker/mosaic.py",
+          "--raster_paths", "${NOMAD_META_raster_paths}",
+          "--mosaic_output_path", "${NOMAD_META_output_path}",
+          "--fim_type", "${NOMAD_META_fim_type}",
+          "--clip_geometry_path", "${NOMAD_META_clip_geometry_path}",
+          "--parallel_blocks", "4",
+        ]
+
+        logging {
+          type = "awslogs"
+          config {
+            awslogs-group        = "/aws/ec2/nomad-client-linux-test"
+            awslogs-region       = "us-east-1"
+            awslogs-stream       = "${NOMAD_JOB_ID}"
+            awslogs-create-group = "true"
+          }
+        }
+      }
+
+      env {
+        AWS_DEFAULT_REGION = "us-east-1"
+        # AWS_ACCESS_KEY_ID     = "${NOMAD_META_aws_access_key}"
+        # AWS_SECRET_ACCESS_KEY = "${NOMAD_META_aws_secret_key}"
+        # AWS_SESSION_TOKEN     = "${NOMAD_META_aws_session_token}"
+
+        
+        # GDAL Configuration
+        GDAL_NUM_THREADS = "4"
+        GDAL_TIFF_DIRECT_IO = "YES"
+        GDAL_DISABLE_READDIR_ON_OPEN = "TRUE"
+        CPL_LOG_ERRORS = "ON"
+        CPL_VSIL_CURL_ALLOWED_EXTENSIONS = ".tif,.vrt"
+        VSI_CACHE_SIZE = "512000000" # s3 data cache size
+        GDAL_SWATH_SIZE = "4294967296"  # 4096 MB (4 GB) for translate operations and copying data between raster datasets
+        GDAL_CACHEMAX = "2048"
+        CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE = "YES"
+
+        # Set retry explicitely to ensure mosaic retries blocks when it hits s3 throttling.
+        GDAL_HTTP_MAX_RETRY =  "2"
+        GDAL_HTTP_RETRY_DELAY = "5"
+        GDAL_HTTP_RETRY_CODES =  "ALL"
+        
+        # Output Configuration
+        MOSAIC_BLOCK_SIZE = "2048" # use bigger blocks to boost the  effect of using multiple threads
+        MOSAIC_COMPRESS_TYPE = "LZW"
+        MOSAIC_PREDICTOR = "2"
+        
+        EXTENT_NODATA_VALUE = "255"
+        DEPTH_NODATA_VALUE = "-9999"
+        
+        LOG_SUCCESS_LEVEL_NUM = "25"
+      }
+
+      resources {
+        memory = 14000 #Be generous here to avoid OOM. For 10m this should be 10 gb, 12 gb for 5m, 16-18gb for 10m 
+      }
+
+      logs {
+        max_files     = 5
+        max_file_size = 10 # MB
+      }
+    }
+  }
+}
