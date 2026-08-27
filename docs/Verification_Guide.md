@@ -1,10 +1,8 @@
 # Auto-Eval Coordinator: Verification Guide [DRAFT]
 
-> **Disclaimer:** These steps are a draft and have not been fully run end-to-end against a live deployment. They are based on the PI-7 UAT procedure, the [nomad-runner](https://github.com/NGWPC/nomad-runner) repo as currently understood, and [batch-run-guide-AWS-Test.md](./batch-run-guide-AWS-Test.md). They are subject to change if `nomad-runner`'s configuration changes, and should be expected to need corrections once actually verified in practice.
+> **Disclaimer:** These steps are a draft and have not been run end-to-end against a live deployment — testing and verification of this deployment were descoped and will not be performed by this team. They are based on the PI-7 UAT procedure, the [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) repo as currently understood, and [batch-run-guide-AWS-Test.md](./batch-run-guide-AWS-Test.md). Treat this as a starting point rather than a validated procedure: it is subject to change if `nomad-runner`'s configuration changes, and should be expected to need corrections when whoever deploys next actually works through it.
 
-> **TODO:** `NGWPC/nomad-runner` is currently a private repo — OWP does not yet have access to it, and every link to it in this document is currently unreachable for that audience. Either make it public or create a delivery copy (e.g. `NOAA-OWP/nomad-runner`) before handing this document off. Remove this note once resolved.
-
-Run this guide after completing all phases of [Deployment_Runbook.md](./Deployment_Runbook.md). Part 1 proves the deployment works end-to-end using a fixed, known-good test unit — the same way the system was verified in the previous (NGWPC) environment. Part 2 generalizes that same smoke test into routine batch operations for a real evaluation run.
+Run this guide after completing all phases of [Deployment_Runbook.md](./Deployment_Runbook.md). Part 1 is intended to prove the deployment works end-to-end using a fixed, known-good test unit — the same way the system was verified in the previous (NGWPC) environment — but has not itself been executed. Part 2 generalizes that same smoke test into routine batch operations for a real evaluation run.
 
 **Predefined test unit:** STAC item `01080203-shvm3-usgs` from `usgs-fim-collection` (HUC8 01080203, gauge shvm3). Test benchmark assets and HAND index data for this unit are included in the repository under `testdata/`. All smoke test commands below use this unit.
 
@@ -265,7 +263,7 @@ Once Part 1 confirms the deployment works end-to-end, use this procedure for rou
 
 Set the ASG desired capacity before submitting. A good rule of thumb: set client count to half the number of concurrent pipelines you intend to run. The AWS Test account's reference sizing used a `c5.9xlarge` Nomad server with 10-40 `r5a.xlarge` clients — beyond ~40 clients the server struggled to communicate with the fleet effectively, so treat that as a practical ceiling unless the server is sized up. See [job-sizing-guide.md](./job-sizing-guide.md) for guidance on sizing individual job memory requirements based on data resolution.
 
-The Nomad client fleet and its autoscaling are provisioned by [nomad-runner](https://github.com/NGWPC/nomad-runner), not this repo — see its README's "Autoscaling Overview" section for full detail. Two separate things need to change, both there:
+The Nomad client fleet and its autoscaling are provisioned by [nomad-runner](https://github.com/NOAA-OWP/nomad-runner), not this repo — see its README's "Autoscaling Overview" section for full detail. Two separate things need to change, both there:
 
 **1. Disable the Nomad Autoscaler job** (a Nomad job named `autoscaler` that automatically adjusts ASG desired capacity based on cluster utilization — it will fight you if left running while you set capacity manually):
 
@@ -405,7 +403,7 @@ Finally, reverse the two steps from §2.1: set the ASG desired capacity back to 
 
 ### Nomad client provisioning issues
 
-The symptoms below can surface while running this guide (typically at §1 or during the smoke test in §6), but the root cause and fix live in cluster provisioning — the [nomad-runner](https://github.com/NGWPC/nomad-runner) repo, not this one. If you hit these, go there rather than trying to work around them here.
+The symptoms below can surface while running this guide (typically at §1 or during the smoke test in §6), but the root cause and fix live in cluster provisioning — the [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) repo, not this one. If you hit these, go there rather than trying to work around them here.
 
 | Symptom | Likely cause | Where to look |
 |---------|-------------|----------------|
@@ -418,6 +416,8 @@ The symptoms below can surface while running this guide (typically at §1 or dur
 
 ## 10. Production Readiness Sign-Off
 
+This checklist has not been worked through or signed off by this team — testing and verification were descoped. It's left here as the criteria whoever deploys next should confirm before calling the system production-ready.
+
 **Infrastructure**
 - **Pass:** Nomad cluster provisioned via `nomad-runner` Terraform
 - **Pass:** EC2 client nodes in correct ASG, registered with `node.class = linux`
@@ -426,7 +426,7 @@ The symptoms below can surface while running this guide (typically at §1 or dur
 
 **Container Registry**
 - **Pass:** All three `ghcr.io/ngwpc/auto-eval-*` packages are public
-- **Pass:** CI on `owp-deployment` branch completed and pushed `latest` tags
+- **Pass:** CI on `main` completed and pushed `latest` tags
 
 **Job Definitions**
 - **Pass:** All four jobs registered in Nomad

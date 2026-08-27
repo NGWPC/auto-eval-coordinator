@@ -1,8 +1,6 @@
 # Auto-Eval Coordinator: Deployment Guide [DRAFT]
 
-> **Disclaimer:** These steps are a draft and have not been fully run end-to-end against a live deployment. They are based on the PI-7 UAT procedure, the [nomad-runner](https://github.com/NGWPC/nomad-runner) repo as currently understood, and [batch-run-guide-AWS-Test.md](./batch-run-guide-AWS-Test.md). They are subject to change if `nomad-runner`'s configuration changes, and should be expected to need corrections once actually verified in practice.
-
-> **TODO:** `NGWPC/nomad-runner` is currently a private repo — OWP does not yet have access to it, and every link to it in this document is currently unreachable for that audience. Either make it public or create a delivery copy (e.g. `NOAA-OWP/nomad-runner`) before handing this document off. Remove this note once resolved.
+> **Disclaimer:** These steps are a draft and have not been run end-to-end against a live deployment — testing and verification of this deployment were descoped and will not be performed by this team. They are based on the PI-7 UAT procedure, the [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) repo as currently understood, and [batch-run-guide-AWS-Test.md](./batch-run-guide-AWS-Test.md). Treat this as a starting point rather than a validated procedure: it is subject to change if `nomad-runner`'s configuration changes, and should be expected to need corrections when whoever deploys next actually works through it.
 
 ## Overview & Architecture
 
@@ -17,7 +15,7 @@ This runbook covers the OWP deployment procedure. It aligns with **PI-7 UAT Test
 | Coordinator | `ghcr.io/ngwpc/auto-eval-coordinator:latest` |
 | Jobs image | `ghcr.io/ngwpc/auto-eval-jobs:latest` |
 | Jobs (GVAL) image | `ghcr.io/ngwpc/auto-eval-jobs-gval:latest` |
-| Nomad cluster | Provisioned separately via [nomad-runner](https://github.com/NGWPC/nomad-runner) |
+| Nomad cluster | Provisioned separately via [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) |
 | STAC API | BenchmarkCat STAC (URL from Terraform output); local `stac-fastapi-pgstac` for dev |
 | Registry | Public GHCR — no auth required |
 
@@ -51,10 +49,10 @@ aws s3 sync s3://fimc-data/autoeval/hand_output_indices/<index-name>/ \
 
 **Option B: Generate a new HAND index**
 
-Clone and build the [`hand-index`](https://github.com/NGWPC/hand-index) container:
+Clone and build the [`hand-index`](https://github.com/NOAA-OWP/hand-index) container:
 
 ```bash
-git clone https://github.com/NGWPC/hand-index.git
+git clone https://github.com/NOAA-OWP/hand-index.git
 cd hand-index
 docker build -t hand-index:latest .
 ```
@@ -104,13 +102,13 @@ export NOMAD_TOKEN="<your-token>"
 nomad status
 ```
 
-Export both `NOMAD_ADDR` and `NOMAD_TOKEN` as a standard step for any nomad-runner-provisioned cluster (test/prod) — the token is provisioned independently in the [nomad-runner](https://github.com/NGWPC/nomad-runner) repo, not by this repo. A local/dev cluster with ACLs disabled (see `example.env`) tolerates a blank or placeholder `NOMAD_TOKEN`, but default to exporting it.
+Export both `NOMAD_ADDR` and `NOMAD_TOKEN` as a standard step for any nomad-runner-provisioned cluster (test/prod) — the token is provisioned independently in the [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) repo, not by this repo. A local/dev cluster with ACLs disabled (see `example.env`) tolerates a blank or placeholder `NOMAD_TOKEN`, but default to exporting it.
 
 **Gate:** Do not proceed until `nomad status` returns successfully against your cluster and the HAND index is confirmed on OWP S3.
 
 ---
 
-## Phase 1: Pull (or Build) and Verify Container Images
+## Phase 1: Pull and Verify Container Images
 
 Before registering jobs or running any pipeline commands, pull the images from GHCR and confirm the names match what the Nomad job definitions and `docker run` commands expect.
 
@@ -130,28 +128,9 @@ docker images | grep ngwpc
 # ghcr.io/ngwpc/auto-eval-jobs-gval     latest   ...
 ```
 
-**Gate:** Do not proceed until all three images are present locally, either pulled from GHCR or built via the fallback below.
+**Gate:** Do not proceed until all three images are present locally.
 
 **Where each image actually needs to pull:** `auto-eval-coordinator` only ever runs on the admin machine (via `docker run`/`docker compose`), so a successful pull here is sufficient for that image. `auto-eval-jobs` and `auto-eval-jobs-gval` are pulled by Nomad *client* nodes when a dispatched job is scheduled — a successful pull from the admin machine does not guarantee those images are reachable from the client fleet (different network path, security groups, etc). The real confirmation that Nomad clients can pull `auto-eval-jobs`/`auto-eval-jobs-gval` is the Single Pipeline Smoke Test in [Verification_Guide.md](./Verification_Guide.md) succeeding.
-
-### Fallback: Build Images Locally
-
-> **TODO:** GHCR publishing for `auto-eval-jobs` and `auto-eval-jobs-gval` is currently blocked on org permissions. Once images are published and `docker pull` above succeeds for all three, remove this fallback section. If GHCR access turns out not to be appropriate for this deployment, keep this section as the primary path instead.
-
-Build the images locally and tag them to match what the Nomad job definitions expect:
-
-```bash
-# auto-eval-coordinator (this repo)
-git clone https://github.com/NGWPC/auto-eval-coordinator.git -b owp-deployment
-docker build -t ghcr.io/ngwpc/auto-eval-coordinator:latest ./auto-eval-coordinator
-
-# auto-eval-jobs and auto-eval-jobs-gval (separate repo, built from two Dockerfiles at its root; Dockerfiles live on main)
-git clone https://github.com/NGWPC/auto-eval-jobs.git
-docker build -t ghcr.io/ngwpc/auto-eval-jobs:latest -f ./auto-eval-jobs/Dockerfile ./auto-eval-jobs
-docker build -t ghcr.io/ngwpc/auto-eval-jobs-gval:latest -f ./auto-eval-jobs/Dockerfile.gval ./auto-eval-jobs
-```
-
-Tagging locally-built images with the same `ghcr.io/...` names lets the Nomad job definitions reference them unmodified — `docker pull` is simply skipped for that image. This only works if the Nomad client nodes pull from the **same Docker daemon** the images were built on (e.g. a single-node dev cluster). For a multi-node cluster, push the locally-built images to a registry that all client nodes can reach (an internal registry, or GHCR once access is restored) instead of relying on the local Docker image cache.
 
 ---
 
@@ -160,7 +139,7 @@ Tagging locally-built images with the same `ghcr.io/...` names lets the Nomad jo
 > **Machine: admin machine**
 
 ```bash
-git clone https://github.com/NGWPC/auto-eval-coordinator.git -b owp-deployment
+git clone https://github.com/NOAA-OWP/auto-eval-coordinator.git
 cd auto-eval-coordinator
 cp example.env .env
 ```
@@ -217,7 +196,7 @@ The coordinator queries a STAC API for benchmark data. Two options depending on 
 
 ### Option A: Use the deployed BenchmarkCat STAC (recommended for OWP test/prod)
 
-The BenchmarkCat STAC API URL is an output of the [BenchmarkCat Terraform deployment](https://github.com/NGWPC/benchmarkcat/blob/owp-deployment/deployment/terraform/TF_README.md). Retrieve it from the BenchmarkCat Terraform state:
+The BenchmarkCat STAC API URL is an output of the [BenchmarkCat Terraform deployment](https://github.com/NOAA-OWP/benchmarkcat/blob/main/deployment/terraform/TF_README.md). Retrieve it from the BenchmarkCat Terraform state:
 
 ```bash
 cd <benchmarkcat-terraform-dir>
@@ -267,7 +246,7 @@ Set `STAC_API_URL` in `pipeline.nomad` to `http://localhost:8082/` for local use
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| Job stuck in `pending` | No client matches node class constraint | Confirm clients are registered with `node.class = linux` via `nomad node status`; if misconfigured, that's set in [nomad-runner](https://github.com/NGWPC/nomad-runner)'s client agent config, not this repo |
+| Job stuck in `pending` | No client matches node class constraint | Confirm clients are registered with `node.class = linux` via `nomad node status`; if misconfigured, that's set in [nomad-runner](https://github.com/NOAA-OWP/nomad-runner)'s client agent config, not this repo |
 | Image pull failures | GHCR package visibility | Confirm `ghcr.io/ngwpc/auto-eval-*` packages are public |
 
 ---
