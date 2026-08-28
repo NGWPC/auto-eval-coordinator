@@ -1,6 +1,6 @@
 This document contains instructions for running a batch of autoeval pipelines in the AWS test account.
 
-The test account instructions assume that you are interacting with a Nomad API that is set up in a way similar to the [nomad-runner](https://github.com/NGWPC/nomad-runner) deployment. This deployment uses a single Nomad server that sends jobs to a group of EC2 instances in an ASG group.
+The test account instructions assume that you are interacting with a Nomad API that is set up in a way similar to the [nomad-runner](https://github.com/NOAA-OWP/nomad-runner) deployment. This deployment uses a single Nomad server that sends jobs to a group of EC2 instances in an ASG group.
 
 # Running a pipeline batch in the AWS test account
 

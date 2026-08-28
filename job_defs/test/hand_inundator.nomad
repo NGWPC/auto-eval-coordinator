@@ -38,15 +38,8 @@ job "hand_inundator" {
       driver = "docker"
 
       config {
-        # use last known stable version in test
-        image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-jobs-v0.2" 
-        force_pull = false
-        # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
-
-        auth {
-          username = "ReadOnly_NGWPC_Group_Deploy_Token" # Or your specific username
-          password = "${NOMAD_META_registry_token}"
-        }
+        image = "ghcr.io/ngwpc/auto-eval-jobs:latest"
+        force_pull = true
         command = "python3"
         args = [
           "/deploy/hand_inundator/inundate.py",

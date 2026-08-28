@@ -39,14 +39,8 @@ job "agreement_maker" {
       driver = "docker"
 
       config {
-        image = "registry.sh.nextgenwaterprediction.com/ngwpc/fim-c/flows2fim_extents:autoeval-jobs-gval-v0.2" 
-        force_pull = false
-        # force_pull = true # use a cached image on client if available. To force a pull need to change back to force_pull = true
-
-        auth {
-          username = "ReadOnly_NGWPC_Group_Deploy_Token" # Or your specific username
-          password = "${NOMAD_META_registry_token}"
-        }
+        image = "ghcr.io/ngwpc/auto-eval-jobs-gval:latest"
+        force_pull = true
         command = "python3"
         args = [
           "/deploy/agreement_maker/make_agreement.py",

@@ -25,3 +25,5 @@ local-reports/
 cache/aiohttp_cache.sqlite
 reports/
 analysis/
+
+*.gitkeep
